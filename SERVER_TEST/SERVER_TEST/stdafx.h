@@ -41,12 +41,12 @@ constexpr int NAME_SIZE = 20;
 constexpr int CHAT_SIZE = 100;
 
 constexpr int MAX_USER = 10000;
-constexpr int MAX_NPC = 20000;
+constexpr int MAX_NPC = 0000;
 
 constexpr int W_WIDTH = 2000;
 constexpr int W_HEIGHT = 2000;
 
-enum EVENT_TYPE { EV_RANDOM_MOVE, EV_CHASE_MOVE };
+enum EVENT_TYPE { EV_RANDOM_MOVE, EV_CHASE_MOVE, EV_ATTACK };
 
 struct TIMER_EVENT {
 	int obj_id;
@@ -66,7 +66,7 @@ public:
 	mutable shared_mutex s_mutex;
 };
 
-enum COMP_TYPE { OP_ACCEPT, OP_RECV, OP_SEND, OP_NPC_MOVE, OP_AI_HELLO };
+enum COMP_TYPE { OP_ACCEPT, OP_RECV, OP_SEND, OP_NPC_MOVE, OP_AI_HELLO, OP_NPC_ATTACK };
 class OVER_EXP {
 public:
 	WSAOVERLAPPED _over;
@@ -92,3 +92,62 @@ public:
 };
 
 
+struct TILEPOINT
+{
+	short x;
+	short y;
+
+	TILEPOINT operator+(const TILEPOINT& other) const {
+		TILEPOINT result;
+		result.x = this->x + other.x;
+		result.y = this->y + other.y;
+		return result;
+	}
+};
+
+struct PointHash {
+	std::size_t operator()(const TILEPOINT& p) const {
+		std::size_t hash = 17;
+		hash = hash * 31 + std::hash<int>()(p.x);
+		hash = hash * 31 + std::hash<int>()(p.y);
+		return hash;
+	}
+};
+
+struct PointEqual {
+	bool operator()(const TILEPOINT& p1, const TILEPOINT& p2) const {
+		return (p1.x == p2.x) && (p1.y == p2.y);
+	}
+};
+
+
+class A_star_Node
+{
+public:
+	int F = 0;
+	int G = 0;
+	int H = 0;
+	shared_ptr<A_star_Node> parent;
+	TILEPOINT Pos = { 0,0 };
+	A_star_Node() {}
+	A_star_Node(TILEPOINT _Pos, TILEPOINT _Dest_Pos, int _G, shared_ptr<A_star_Node> node)
+	{
+		Pos = _Pos;
+		G = _G;
+		H = abs(_Dest_Pos.y - Pos.y) + abs(_Dest_Pos.x - Pos.x);
+		F = G + H;
+		if (node) {
+			parent = node;
+		}
+	}
+	void Initialize(TILEPOINT _Pos, TILEPOINT _Dest_Pos, int _G, shared_ptr<A_star_Node> node)
+	{
+		Pos = _Pos;
+		G = _G;
+		H = abs(_Dest_Pos.y - Pos.y) + abs(_Dest_Pos.x - Pos.x);
+		F = G + H;
+		if (node) {
+			parent = node;
+		}
+	}
+};

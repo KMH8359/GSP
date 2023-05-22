@@ -32,6 +32,9 @@ int g_myid;
 
 sf::RenderWindow* g_window;
 sf::Font g_font;
+bool on_chat = false;
+char m_mess[CHAT_SIZE]{ "" };
+unsigned short chat_length = 0;
 
 class OBJECT {
 private:
@@ -75,8 +78,8 @@ public:
 		g_window->draw(m_sprite);
 	}
 
-	void a_resize(short width) {
-		m_sprite.setTextureRect(sf::IntRect(0, 0, width, 50));
+	void a_resize(short w_start, short w_end, short h_start, short h_end ) {
+		m_sprite.setTextureRect(sf::IntRect(w_start, w_end, h_start, h_end));
 	}
 
 	void move(int x, int y) {
@@ -122,20 +125,26 @@ array<array<bool, W_WIDTH>, W_WIDTH> GridMap;
 OBJECT white_tile;
 OBJECT black_tile;
 OBJECT HPBAR[2];
+OBJECT Level;
 
 sf::Texture* board;
 sf::Texture* pieces;
+sf::Texture* monsters;
 sf::Texture* hp_bar[2];
+sf::Texture* lv;
+
 void client_initialize()
 {
 	board = new sf::Texture;
 	pieces = new sf::Texture;
+	monsters = new sf::Texture;
+	lv = new sf::Texture;
 	hp_bar[0] = new sf::Texture;
-	hp_bar[1] = new sf::Texture;
 	board->loadFromFile("tilemap.bmp");
 	pieces->loadFromFile("character.png");
+	monsters->loadFromFile("skeleton.png");
+	lv->loadFromFile("Lv.png");
 	hp_bar[0]->loadFromFile("HP_ON.png");
-	hp_bar[1]->loadFromFile("HP_OFF.png");
 
 	if (false == g_font.loadFromFile("cour.ttf")) {
 		cout << "Font Loading Error!\n";
@@ -144,8 +153,8 @@ void client_initialize()
 	white_tile = OBJECT{ *board, 13, 112, TILE_WIDTH, TILE_WIDTH };
 	black_tile = OBJECT{ *board, 13, 8, TILE_WIDTH, TILE_WIDTH };
 	HPBAR[0] = OBJECT{ *hp_bar[0], 0, 0, 200, 50};
-	HPBAR[0].a_move(0, 0);
-	HPBAR[1] = OBJECT{ *hp_bar[1], 0, 0, 200, 50 };
+	HPBAR[0].a_move(50, 0);
+	Level = OBJECT{ *lv, 0, 0, 50, 50 };
 	
 	char value;
 	ifstream file("map.txt");
@@ -160,7 +169,6 @@ void client_initialize()
 	}
 
 	avatar = OBJECT{ *pieces, 0, 0, 50, 50 };
-	//avatar.move(4, 4);
 }
 
 void client_finish()
@@ -168,6 +176,7 @@ void client_finish()
 	players.clear();
 	delete board;
 	delete pieces;
+	delete monsters;
 	for (auto& img : hp_bar)
 		delete img;
 }
@@ -182,9 +191,9 @@ void ProcessPacket(char* ptr)
 		SC_LOGIN_INFO_PACKET* packet = reinterpret_cast<SC_LOGIN_INFO_PACKET*>(ptr);
 		g_myid = packet->id;
 		avatar.id = g_myid;
-		avatar.move(packet->x, packet->y);
-		g_left_x = packet->x - SCREEN_WIDTH / 2;
-		g_top_y = packet->y - SCREEN_HEIGHT / 2;
+		avatar.move(packet->point.x, packet->point.y);
+		g_left_x = packet->point.x - SCREEN_WIDTH / 2;
+		g_top_y = packet->point.y - SCREEN_HEIGHT / 2;
 		avatar.show();
 	}
 	break;
@@ -193,25 +202,24 @@ void ProcessPacket(char* ptr)
 	{
 		SC_ADD_OBJECT_PACKET* my_packet = reinterpret_cast<SC_ADD_OBJECT_PACKET*>(ptr);
 		int id = my_packet->id;
-		cout << id << "Added\n";
 		if (id == g_myid) {
-			avatar.move(my_packet->x, my_packet->y);
-			g_left_x = my_packet->x - SCREEN_WIDTH / 2;
-			g_top_y = my_packet->y - SCREEN_HEIGHT / 2;
+			avatar.move(my_packet->point.x, my_packet->point.y);
+			g_left_x = my_packet->point.x - SCREEN_WIDTH / 2;
+			g_top_y = my_packet->point.y - SCREEN_HEIGHT / 2;
 			avatar.show();
 		}
 		else if (id < MAX_USER) {
 			players[id] = OBJECT{ *pieces, 0, 0, 50, 50 };
 			
 			players[id].id = id;
-			players[id].move(my_packet->x, my_packet->y);
+			players[id].move(my_packet->point.x, my_packet->point.y);
 			players[id].set_name(my_packet->name);
 			players[id].show();
 		}
 		else {
-			players[id] = OBJECT{ *pieces, 0, 200, 50, 50 };
+			players[id] = OBJECT{ *monsters, 0, 200, 50, 50 };
 			players[id].id = id;
-			players[id].move(my_packet->x, my_packet->y);
+			players[id].move(my_packet->point.x, my_packet->point.y);
 			players[id].set_name(my_packet->name);
 			players[id].show();
 		}
@@ -222,13 +230,13 @@ void ProcessPacket(char* ptr)
 		SC_MOVE_OBJECT_PACKET* my_packet = reinterpret_cast<SC_MOVE_OBJECT_PACKET*>(ptr);
 		int other_id = my_packet->id;
 		if (other_id == g_myid) {
-			avatar.move(my_packet->x, my_packet->y);
-			g_left_x = my_packet->x - SCREEN_WIDTH / 2;
-			g_top_y = my_packet->y - SCREEN_HEIGHT / 2;
-			HPBAR[0].a_resize(avatar.HP);
+			avatar.move(my_packet->point.x, my_packet->point.y);
+			g_left_x = my_packet->point.x - SCREEN_WIDTH / 2;
+			g_top_y = my_packet->point.y - SCREEN_HEIGHT / 2;
+			//HPBAR[0].a_resize(0, 0, avatar.HP, 50);
 		}
 		else {
-			players[other_id].move(my_packet->x, my_packet->y);
+			players[other_id].move(my_packet->point.x, my_packet->point.y);
 		}
 		break;
 	}
@@ -241,7 +249,6 @@ void ProcessPacket(char* ptr)
 			avatar.hide();
 		}
 		else {
-			cout << other_id << "erased\n";
 			players.erase(other_id);
 		}
 		break;
@@ -324,6 +331,7 @@ void client_main()
 			}
 		}
 	HPBAR[0].a_draw();
+	Level.a_draw();
 	avatar.draw();
 	for (auto& pl : players) pl.second.draw();
 	sf::Text text;
@@ -348,7 +356,7 @@ int main()
 	s_socket.setBlocking(false);
 
 	if (status != sf::Socket::Done) {
-		wcout << L"������ ������ �� �����ϴ�.\n";
+		wcout << L"Connect Failed.\n";
 		exit(-1);
 	}
 
@@ -375,19 +383,50 @@ int main()
 			if (event.type == sf::Event::Closed)
 				window.close();
 			if (event.type == sf::Event::KeyPressed) {
+				if (on_chat) {
+					if (event.key.code >= sf::Keyboard::A && event.key.code <= sf::Keyboard::Z)
+					{
+						char inputChar = static_cast<char>('A' + (event.key.code - sf::Keyboard::A));
+						// 알파벳 키 입력 처리 로직
+						m_mess[chat_length++] = inputChar;
+					}
+					else if (event.key.code >= sf::Keyboard::Num0 && event.key.code <= sf::Keyboard::Num9)
+					{
+						char inputChar = static_cast<char>('0' + (event.key.code - sf::Keyboard::Num0));
+						// 숫자 키 입력 처리 로직
+						m_mess[chat_length++] = inputChar;
+					}
+					else if (event.key.code == sf::Keyboard::Backspace)
+					{
+						m_mess[chat_length--] = (char)"";
+					}
+					else if (event.key.code == sf::Keyboard::Enter)
+					{
+						cout << "CHAT OFF\n";
+						on_chat = false;
+						chat_length = 0;
+						memset(m_mess, 0, CHAT_SIZE);
+					}
+					avatar.set_chat(m_mess);
+					break;
+				}
 				int direction = -1;
 				switch (event.key.code) {
+				case sf::Keyboard::Down:
+					direction = 0;
+					break;
 				case sf::Keyboard::Left:
+					direction = 1;
+					break;
+				case sf::Keyboard::Up:
 					direction = 2;
 					break;
 				case sf::Keyboard::Right:
 					direction = 3;
 					break;
-				case sf::Keyboard::Up:
-					direction = 0;
-					break;
-				case sf::Keyboard::Down:
-					direction = 1;
+				case sf::Keyboard::Return:
+					cout << "CHAT ON\n";
+					on_chat = true;
 					break;
 				case sf::Keyboard::Escape:
 					window.close();
@@ -405,6 +444,7 @@ int main()
 					p.type = CS_MOVE;
 					p.direction = direction;
 					send_packet(&p);
+					avatar.a_resize(0, direction * 50, 50, 50);
 					continue;
 				}
 			}

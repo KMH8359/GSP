@@ -1,18 +1,17 @@
 #pragma once
 #include "CHARACTER.h"
+#include "protocol.h"
 
 class SESSION : public CHARACTER {
 	OVER_EXP _recv_over;
 public:
 	SOCKET _socket;
-	int	 EXP;
 	int		_prev_remain;
 	int		last_move_time;
 public:
 	SESSION()
 	{
 		_socket = 0;
-		EXP = 0;
 		_prev_remain = 0;
 	}
 
@@ -39,8 +38,8 @@ public:
 		p.id = _id;
 		p.size = sizeof(SC_LOGIN_INFO_PACKET);
 		p.type = SC_LOGIN_INFO;
-		p.x = x;
-		p.y = y;
+		p.point.x = point.x;
+		p.point.y = point.y;
 		do_send(&p);
 	}
 	void send_move_packet(int c_id);

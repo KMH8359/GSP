@@ -10,6 +10,25 @@ array<array<bool, W_WIDTH>, W_HEIGHT> GridMap;
 SOCKET listenSocket, g_c_socket;
 OVER_EXP g_a_over;
 
+TILEPOINT Trace_Player(TILEPOINT origin, TILEPOINT destination);
+
+
+TILEPOINT vec[8]{
+	TILEPOINT(-1,0),
+TILEPOINT(1,0),
+TILEPOINT(0,1),
+TILEPOINT(0,-1),
+TILEPOINT(-1,-1),
+TILEPOINT(-1,1),
+TILEPOINT(1,-1),
+TILEPOINT(1,1)
+};
+
+bool point_compare(TILEPOINT p1, TILEPOINT p2)
+{
+	return p1.x == p2.x && p1.y == p2.y;
+}
+
 bool is_pc(int object_id)
 {
 	return object_id < MAX_USER;
@@ -22,14 +41,14 @@ bool is_npc(int object_id)
 
 bool can_see(int from, int to)
 {
-	if (abs(clients[from]->x - clients[to]->x) > VIEW_RANGE) return false;
-	return abs(clients[from]->y - clients[to]->y) <= VIEW_RANGE;
+	if (abs(clients[from]->point.x - clients[to]->point.x) > VIEW_RANGE) return false;
+	return abs(clients[from]->point.y - clients[to]->point.y) <= VIEW_RANGE;
 }
 
 bool can_attack(int from, int to)
 {
-	if (abs(clients[from]->x - clients[to]->x) > ATTACK_RANGE) return false;
-	return abs(clients[from]->y - clients[to]->y) <= ATTACK_RANGE;
+	if (abs(clients[from]->point.x - clients[to]->point.x) > ATTACK_RANGE) return false;
+	return abs(clients[from]->point.y - clients[to]->point.y) <= ATTACK_RANGE;
 }
 
 void SESSION::send_move_packet(int c_id)
@@ -39,8 +58,8 @@ void SESSION::send_move_packet(int c_id)
 	p.id = c_id;
 	p.size = sizeof(SC_MOVE_OBJECT_PACKET);
 	p.type = SC_MOVE_OBJECT;
-	p.x = session->x;
-	p.y = session->y;
+	p.point.x = session->point.x;
+	p.point.y = session->point.y;
 	p.move_time = session->last_move_time;
 	do_send(&p);
 }
@@ -53,8 +72,8 @@ void SESSION::send_add_player_packet(int c_id)
 	strcpy_s(add_packet.name, session->_name);
 	add_packet.size = sizeof(add_packet);
 	add_packet.type = SC_ADD_OBJECT;
-	add_packet.x = session->x;
-	add_packet.y = session->y;
+	add_packet.point.x = session->point.x;
+	add_packet.point.y = session->point.y;
 	_view_list.s_mutex.lock();
 	_view_list.insert(c_id);
 	_view_list.s_mutex.unlock();
@@ -95,6 +114,7 @@ void WakeUpNPC(int npc_id, int waker)
 	bool old_state = false;
 	if (false == atomic_compare_exchange_strong(&NPC->_is_active, &old_state, true))
 		return;
+	NPC->target_id = waker;
 	TIMER_EVENT ev{ npc_id, chrono::system_clock::now(), EV_RANDOM_MOVE, 0 };
 	timer_queue.push(ev);
 }
@@ -108,8 +128,8 @@ void process_packet(int c_id, char* packet)
 		strcpy_s(session->_name, p->name);
 		{
 			//lock_guard<mutex> ll{ session->_s_lock };
-			session->x = rand() % W_WIDTH;
-			session->y = rand() % W_HEIGHT;
+			session->point.x = rand() % W_WIDTH;
+			session->point.y = rand() % W_HEIGHT;
 			session->_state.store(ST_INGAME);
 		}
 		session->send_login_info_packet();
@@ -132,17 +152,17 @@ void process_packet(int c_id, char* packet)
 	case CS_MOVE: {
 		CS_MOVE_PACKET* p = reinterpret_cast<CS_MOVE_PACKET*>(packet);
 		session->last_move_time = p->move_time;
-		short x = session->x;
-		short y = session->y;
+		short x = session->point.x;
+		short y = session->point.y;
 		switch (p->direction) {
-		case 0: if (y > 0) y--; break;
-		case 1: if (y < W_HEIGHT - 1) y++; break;
-		case 2: if (x > 0) x--; break;
+		case 0: if (y < W_HEIGHT - 1) y++; break;
+		case 1: if (x > 0) x--; break;
+		case 2: if (y > 0) y--; break; 
 		case 3: if (x < W_WIDTH - 1) x++; break;
 		}
 		if (GridMap[x][y]) {
-			session->x = x;
-			session->y = y;
+			session->point.x = x;
+			session->point.y = y;
 		}
 
 		unordered_set<int> near_list;
@@ -193,8 +213,11 @@ void process_packet(int c_id, char* packet)
 		session->_view_list.s_mutex.unlock_shared();
 		for (auto& pl : near_list) {
 			auto& cpl = clients[pl];
-			if (is_npc(pl) && can_attack(c_id, pl))
+			if (is_npc(pl) && can_attack(c_id, pl)) {
 				cout << cpl->_id << "Damaged\n";
+				if (cpl->HP <= 0)
+					session->EXP += cpl->EXP;
+			}
 		}
 	}
 		break;
@@ -230,13 +253,12 @@ void do_npc_random_move(int npc_id)
 	for (int i = 0; i < MAX_USER; ++i) {
 		auto& obj = clients[i];
 		if (ST_INGAME != obj->_state.load()) continue;
-		//if (true == is_npc(obj->_id)) continue;
 		if (true == can_see(npc->_id, obj->_id))
 			old_vl.insert(obj->_id);
 	}
 
-	int x = npc->x;
-	int y = npc->y;
+	int x = npc->point.x;
+	int y = npc->point.y;
 	switch (rand() % 4) {
 	case 0: if (x < (W_WIDTH - 1)) x++; break;
 	case 1: if (x > 0) x--; break;
@@ -244,8 +266,8 @@ void do_npc_random_move(int npc_id)
 	case 3:if (y > 0) y--; break;
 	}
 	if (GridMap[x][y]) {
-		npc->x = x;
-		npc->y = y;
+		npc->point.x = x;
+		npc->point.y = y;
 	}
 
 
@@ -267,7 +289,7 @@ void do_npc_random_move(int npc_id)
 			session->send_move_packet(npc->_id);
 		}
 	}
-	///vvcxxccxvvdsvdvds
+
 	for (auto pl : old_vl) {
 		if (0 == new_vl.count(pl)) {
 			auto session = (SESSION*)clients[pl];
@@ -283,6 +305,67 @@ void do_npc_random_move(int npc_id)
 	}
 }
 
+unordered_map<TILEPOINT, shared_ptr<A_star_Node>, PointHash, PointEqual>::iterator getNode(unordered_map<TILEPOINT, shared_ptr<A_star_Node>, PointHash, PointEqual>& m_List)
+{
+	return min_element(m_List.begin(), m_List.end(),
+		[](const pair<const TILEPOINT, shared_ptr<A_star_Node>>& p1, const pair<const TILEPOINT, shared_ptr<A_star_Node>>& p2)
+		{
+			return p1.second->F < p2.second->F;
+		});
+}
+bool check_openList(TILEPOINT& _Pos, int _G, shared_ptr<A_star_Node> s_node, unordered_map<TILEPOINT, shared_ptr<A_star_Node>, PointHash, PointEqual>& m_List)
+{
+	auto iter = m_List.find(_Pos);
+	if (iter != m_List.end()) {
+		if ((*iter).second->G > _G) {
+			(*iter).second->G = _G;
+			(*iter).second->F = (*iter).second->G + (*iter).second->H;
+			(*iter).second->parent = s_node;
+		}
+		return false;
+	}
+	return true;
+}
+TILEPOINT Trace_Player(TILEPOINT origin, TILEPOINT destination)
+{
+	unordered_set<TILEPOINT, PointHash, PointEqual> closelist{};
+	unordered_map<TILEPOINT, shared_ptr<A_star_Node>, PointHash, PointEqual> openlist;
+	openlist.reserve(200);
+	closelist.reserve(600);
+	shared_ptr<A_star_Node> S_Node;
+	
+	openlist.emplace(origin, make_shared<A_star_Node>(origin, destination, 0.f, nullptr));
+
+	while (!openlist.empty())
+	{
+		auto iter = getNode(openlist);
+		S_Node = (*iter).second;
+		cout << S_Node->F << endl;
+		if (point_compare(S_Node->Pos, destination))
+		{
+			while (S_Node->parent != nullptr)
+			{
+				if (point_compare(S_Node->parent->Pos, origin))
+				{
+					cout << S_Node->Pos.x << ", " << S_Node->Pos.y << endl;
+					return S_Node->Pos;
+				}
+				S_Node = S_Node->parent;
+			}
+		}
+		for (int i = 0; i < 8; i++) {
+			TILEPOINT _Pos = S_Node->Pos + vec[i];
+			int _G = S_Node->G + abs(vec[i].x) + abs(vec[i].y);
+			if (closelist.count(_Pos) == 0 && GridMap[_Pos.x][_Pos.y] &&
+				check_openList(_Pos, _G, S_Node, openlist)) {
+				openlist.emplace(_Pos, make_shared<A_star_Node>(_Pos, destination, _G, S_Node));
+			}
+		}
+		closelist.emplace(S_Node->Pos);
+		openlist.erase(iter);
+	}
+	return origin;
+}
 void worker_thread(HANDLE h_iocp)
 {
 	while (true) {
@@ -312,12 +395,8 @@ void worker_thread(HANDLE h_iocp)
 			int client_id = get_new_client_id();
 			if (client_id != -1) {
 				auto session = (SESSION*)clients[client_id];
-				{
-					//lock_guard<mutex> ll(clients[client_id]->_s_lock);
-					session->_state.store(ST_ALLOC);
-				}
-				session->x = 0;
-				session->y = 0;
+				session->_state.store(ST_ALLOC);
+				session->point.x = session->point.y = 0;
 				session->_id = client_id;
 				session->_name[0] = 0;
 				session->_prev_remain = 0;
@@ -369,11 +448,11 @@ void worker_thread(HANDLE h_iocp)
 			}
 			if (true == keep_alive) {
 				do_npc_random_move(static_cast<int>(key));
-				TIMER_EVENT ev{ key, chrono::system_clock::now() + 1s, EV_RANDOM_MOVE, 0 };
+				TIMER_EVENT ev{ static_cast<int>(key), chrono::system_clock::now() + 1s, EV_RANDOM_MOVE, 0 };
 				timer_queue.push(ev);
 			}
 			else {
-				auto NPC = (MONSTER*)clients[key];
+				auto NPC = (MONSTER*)clients[static_cast<int>(key)];
 				NPC->_is_active = false;
 			}
 			delete ex_over;
@@ -391,7 +470,19 @@ void worker_thread(HANDLE h_iocp)
 			//delete ex_over;
 		}
 						break;
-
+		case OP_NPC_ATTACK: {
+			auto NPC = (MONSTER*)clients[key];
+			if (can_attack(static_cast<int>(key), NPC->target_id)) {
+				clients[NPC->target_id]->HP -= 50;
+				TIMER_EVENT ev{ static_cast<int>(key), chrono::system_clock::now() + 1s, EV_ATTACK, 0 };
+				timer_queue.push(ev);
+			}
+			else {
+				TIMER_EVENT ev{ static_cast<int>(key), chrono::system_clock::now() + 1s, EV_RANDOM_MOVE, 0 };
+				timer_queue.push(ev);
+			}
+		}
+						  break;
 		}
 	}
 }
@@ -401,7 +492,7 @@ int API_get_x(lua_State* L)
 	int user_id =
 		(int)lua_tointeger(L, -1);
 	lua_pop(L, 2);
-	int x = clients[user_id]->x;
+	int x = clients[user_id]->point.x;
 	lua_pushnumber(L, x);
 	return 1;
 }
@@ -411,7 +502,7 @@ int API_get_y(lua_State* L)
 	int user_id =
 		(int)lua_tointeger(L, -1);
 	lua_pop(L, 2);
-	int y = clients[user_id]->y;
+	int y = clients[user_id]->point.y;
 	lua_pushnumber(L, y);
 	return 1;
 }
@@ -454,10 +545,12 @@ void InitializeNPC()
 
 	for (int i = MAX_USER; i < MAX_USER + MAX_NPC; ++i) {
 		MONSTER* NPC = new MONSTER();
-		NPC->x = rand() % W_WIDTH;
-		NPC->y = rand() % W_HEIGHT;
+		NPC->point.x = rand() % W_WIDTH;
+		NPC->point.y = rand() % W_HEIGHT;
 		sprintf_s(NPC->_name, "NPC%d", i);
 		NPC->_state = ST_INGAME;
+		NPC->a_type = static_cast<ATTACK_TYPE>(rand() % 2);
+		NPC->m_type = static_cast<MOVE_TYPE>(rand() % 2);
 
 		auto L = NPC->_L = luaL_newstate();
 		luaL_openlibs(L);
@@ -474,6 +567,7 @@ void InitializeNPC()
 		lua_register(L, "API_get_y", API_get_y);
 		clients[i] = NPC;
 		clients[i]->_id = i;
+
 	}
 	cout << "NPC initialize end.\n";
 }
@@ -493,6 +587,11 @@ void do_timer()
 			case EV_RANDOM_MOVE:
 				OVER_EXP* ov = new OVER_EXP;
 				ov->_comp_type = OP_NPC_MOVE;
+				PostQueuedCompletionStatus(h_iocp, 1, ev.obj_id, &ov->_over);
+				break;
+			case EV_ATTACK:
+				OVER_EXP* ov = new OVER_EXP;
+				ov->_comp_type = OP_NPC_ATTACK;
 				PostQueuedCompletionStatus(h_iocp, 1, ev.obj_id, &ov->_over);
 				break;
 			}
@@ -519,6 +618,7 @@ int main()
 
 	SOCKADDR_IN cl_addr{};
 	int addr_size = sizeof(cl_addr);
+
 
 	InitializeNPC();
 	InitializeMap();

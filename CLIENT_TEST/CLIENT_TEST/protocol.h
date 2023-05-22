@@ -26,6 +26,21 @@ constexpr char SC_LOGIN_OK = 7;
 constexpr char SC_LOGIN_FAIL = 8;
 constexpr char SC_STAT_CHANGE = 9;
 
+
+struct TILEPOINT
+{
+	unsigned short x;
+	unsigned short y;
+
+	TILEPOINT operator+(const TILEPOINT& other) const {
+		TILEPOINT result;
+		result.x = this->x + other.x;
+		result.y = this->y + other.y;
+		return result;
+	}
+};
+
+
 #pragma pack (push, 1)
 struct CS_LOGIN_PACKET {
 	unsigned char size;
@@ -69,14 +84,14 @@ struct SC_LOGIN_INFO_PACKET {
 	int		max_hp;
 	int		exp;
 	int		level;
-	short	x, y;
+	TILEPOINT point;
 };
 
 struct SC_ADD_OBJECT_PACKET {
 	unsigned char size;
 	char	type;
 	int		id;
-	short	x, y;
+	TILEPOINT point;
 	char	name[NAME_SIZE];
 };
 
@@ -90,7 +105,7 @@ struct SC_MOVE_OBJECT_PACKET {
 	unsigned char size;
 	char	type;
 	int		id;
-	short	x, y;
+	TILEPOINT point;
 	unsigned int move_time;
 };
 
