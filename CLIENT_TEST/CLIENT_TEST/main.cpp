@@ -32,6 +32,7 @@ int g_myid;
 
 sf::RenderWindow* g_window;
 sf::Font g_font;
+sf::Text Level_Text;
 bool on_chat = false;
 char m_mess[CHAT_SIZE]{ "" };
 unsigned short chat_length = 0;
@@ -48,7 +49,8 @@ public:
 	int		id;
 	int		m_x, m_y;
 	short	HP = 200;
-	int		Exp;
+	int		Exp = 0;
+	int		Level = 0;
 	char name[NAME_SIZE];
 	OBJECT(sf::Texture& t, int x, int y, int x2, int y2) {
 		m_showing = false;
@@ -78,8 +80,12 @@ public:
 		g_window->draw(m_sprite);
 	}
 
-	void a_resize(short w_start, short w_end, short h_start, short h_end ) {
-		m_sprite.setTextureRect(sf::IntRect(w_start, w_end, h_start, h_end));
+	void a_resize(short w_start, short h_start, short w_end, short h_end) {
+		m_sprite.setTextureRect(sf::IntRect(w_start, h_start, w_end, h_end));
+	}
+
+	void t_draw() {
+		g_window->draw(m_chat);
 	}
 
 	void move(int x, int y) {
@@ -143,7 +149,7 @@ void client_initialize()
 	board->loadFromFile("tilemap.bmp");
 	pieces->loadFromFile("character.png");
 	monsters->loadFromFile("skeleton.png");
-	lv->loadFromFile("Lv.png");
+	lv->loadFromFile("L.png");
 	hp_bar[0]->loadFromFile("HP_ON.png");
 
 	if (false == g_font.loadFromFile("cour.ttf")) {
@@ -152,10 +158,20 @@ void client_initialize()
 	}
 	white_tile = OBJECT{ *board, 13, 112, TILE_WIDTH, TILE_WIDTH };
 	black_tile = OBJECT{ *board, 13, 8, TILE_WIDTH, TILE_WIDTH };
+
+	Level = OBJECT{ *lv, 0, 0, 100, 100 };
+
+	Level_Text.setFont(g_font);
+	Level_Text.setCharacterSize(60);
+	Level_Text.setFillColor(sf::Color(255, 0, 0));
+	Level_Text.setPosition(30, 5);
+	char buf[100];
+	sprintf_s(buf, "%d", avatar.Level);
+	Level_Text.setString(buf);
+
+
 	HPBAR[0] = OBJECT{ *hp_bar[0], 0, 0, 200, 50};
-	HPBAR[0].a_move(50, 0);
-	Level = OBJECT{ *lv, 0, 0, 50, 50 };
-	
+	HPBAR[0].a_move(100, 0);
 	char value;
 	ifstream file("map.txt");
 	if (file.is_open()) {
@@ -233,10 +249,12 @@ void ProcessPacket(char* ptr)
 			avatar.move(my_packet->point.x, my_packet->point.y);
 			g_left_x = my_packet->point.x - SCREEN_WIDTH / 2;
 			g_top_y = my_packet->point.y - SCREEN_HEIGHT / 2;
+			avatar.a_resize(0, my_packet->direction * 50, 50, 50);
 			//HPBAR[0].a_resize(0, 0, avatar.HP, 50);
 		}
 		else {
 			players[other_id].move(my_packet->point.x, my_packet->point.y);
+			players[other_id].a_resize(0, my_packet->direction * 50, 50, 50);
 		}
 		break;
 	}
@@ -334,12 +352,7 @@ void client_main()
 	Level.a_draw();
 	avatar.draw();
 	for (auto& pl : players) pl.second.draw();
-	sf::Text text;
-	text.setFont(g_font);
-	char buf[100];
-	sprintf_s(buf, "(%d, %d)", avatar.m_x, avatar.m_y);
-	text.setString(buf);
-	g_window->draw(text);
+	g_window->draw(Level_Text);
 }
 
 void send_packet(void* packet)
@@ -377,6 +390,11 @@ int main()
 
 	while (window.isOpen())
 	{
+		break;
+	}
+
+	while (window.isOpen())
+	{
 		sf::Event event;
 		while (window.pollEvent(event))
 		{
@@ -398,11 +416,11 @@ int main()
 					}
 					else if (event.key.code == sf::Keyboard::Backspace)
 					{
-						m_mess[chat_length--] = (char)"";
+						chat_length--;
+						m_mess[chat_length] = '\0';
 					}
 					else if (event.key.code == sf::Keyboard::Enter)
 					{
-						cout << "CHAT OFF\n";
 						on_chat = false;
 						chat_length = 0;
 						memset(m_mess, 0, CHAT_SIZE);
@@ -425,7 +443,6 @@ int main()
 					direction = 3;
 					break;
 				case sf::Keyboard::Return:
-					cout << "CHAT ON\n";
 					on_chat = true;
 					break;
 				case sf::Keyboard::Escape:
@@ -444,7 +461,6 @@ int main()
 					p.type = CS_MOVE;
 					p.direction = direction;
 					send_packet(&p);
-					avatar.a_resize(0, direction * 50, 50, 50);
 					continue;
 				}
 			}

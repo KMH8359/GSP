@@ -42,9 +42,31 @@ public:
 		p.point.y = point.y;
 		do_send(&p);
 	}
-	void send_move_packet(int c_id);
+	void send_move_packet(int c_id, char direction);
 	void send_add_player_packet(int c_id);
-	void send_chat_packet(int c_id, const char* mess);
+
+
+	void send_chat_packet(int c_id, const char* mess)
+	{
+		SC_CHAT_PACKET packet;
+		packet.id = c_id;
+		packet.size = sizeof(packet);
+		packet.type = SC_CHAT;
+		strcpy_s(packet.mess, mess);
+		do_send(&packet);
+	}
+
+
+	void send_dead_packet(int c_id)
+	{
+		SC_DEAD_PACKET packet;
+		packet.id = c_id;
+		packet.size = sizeof(packet);
+		packet.type = SC_DEAD;
+		do_send(&packet);
+	}
+
+
 	void send_remove_player_packet(int c_id)
 	{
 		_view_list.s_mutex.lock();

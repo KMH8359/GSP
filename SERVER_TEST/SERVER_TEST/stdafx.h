@@ -41,12 +41,12 @@ constexpr int NAME_SIZE = 20;
 constexpr int CHAT_SIZE = 100;
 
 constexpr int MAX_USER = 10000;
-constexpr int MAX_NPC = 0000;
+constexpr int MAX_NPC = 20000;
 
 constexpr int W_WIDTH = 2000;
 constexpr int W_HEIGHT = 2000;
 
-enum EVENT_TYPE { EV_RANDOM_MOVE, EV_CHASE_MOVE, EV_ATTACK };
+enum EVENT_TYPE { EV_RANDOM_MOVE, EV_CHASE_MOVE, EV_ATTACK, EV_REVIVE };
 
 struct TIMER_EVENT {
 	int obj_id;
@@ -64,6 +64,14 @@ class my_unordered_set : public unordered_set<T>
 {
 public:
 	mutable shared_mutex s_mutex;
+
+	my_unordered_set& operator=(const my_unordered_set& other)
+	{
+		s_mutex.lock();
+		unordered_set<T>::operator=(other);
+		s_mutex.unlock();
+		return *this;
+	}
 };
 
 enum COMP_TYPE { OP_ACCEPT, OP_RECV, OP_SEND, OP_NPC_MOVE, OP_AI_HELLO, OP_NPC_ATTACK };

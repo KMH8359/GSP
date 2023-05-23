@@ -5,7 +5,7 @@
 
 concurrent_priority_queue<TIMER_EVENT> timer_queue;
 HANDLE h_iocp;
-array<CHARACTER*, MAX_USER + MAX_NPC> clients;
+array<CHARACTER*, MAX_USER + MAX_NPC> characters;
 array<array<bool, W_WIDTH>, W_HEIGHT> GridMap;
 SOCKET listenSocket, g_c_socket;
 OVER_EXP g_a_over;
@@ -15,13 +15,13 @@ TILEPOINT Trace_Player(TILEPOINT origin, TILEPOINT destination);
 
 TILEPOINT vec[8]{
 	TILEPOINT(-1,0),
-TILEPOINT(1,0),
-TILEPOINT(0,1),
-TILEPOINT(0,-1),
-TILEPOINT(-1,-1),
-TILEPOINT(-1,1),
-TILEPOINT(1,-1),
-TILEPOINT(1,1)
+	TILEPOINT(1,0),
+	TILEPOINT(0,1),
+	TILEPOINT(0,-1),
+	TILEPOINT(-1,-1),
+	TILEPOINT(-1,1),
+	TILEPOINT(1,-1),
+	TILEPOINT(1,1)
 };
 
 bool point_compare(TILEPOINT p1, TILEPOINT p2)
@@ -41,32 +41,33 @@ bool is_npc(int object_id)
 
 bool can_see(int from, int to)
 {
-	if (abs(clients[from]->point.x - clients[to]->point.x) > VIEW_RANGE) return false;
-	return abs(clients[from]->point.y - clients[to]->point.y) <= VIEW_RANGE;
+	if (abs(characters[from]->point.x - characters[to]->point.x) > VIEW_RANGE) return false;
+	return abs(characters[from]->point.y - characters[to]->point.y) <= VIEW_RANGE;
 }
 
 bool can_attack(int from, int to)
 {
-	if (abs(clients[from]->point.x - clients[to]->point.x) > ATTACK_RANGE) return false;
-	return abs(clients[from]->point.y - clients[to]->point.y) <= ATTACK_RANGE;
+	if (abs(characters[from]->point.x - characters[to]->point.x) > ATTACK_RANGE) return false;
+	return abs(characters[from]->point.y - characters[to]->point.y) <= ATTACK_RANGE;
 }
 
-void SESSION::send_move_packet(int c_id)
+void SESSION::send_move_packet(int c_id, char direction)
 {
-	auto session = (SESSION*)clients[c_id];
+	auto session = (SESSION*)characters[c_id];
 	SC_MOVE_OBJECT_PACKET p;
 	p.id = c_id;
 	p.size = sizeof(SC_MOVE_OBJECT_PACKET);
 	p.type = SC_MOVE_OBJECT;
 	p.point.x = session->point.x;
 	p.point.y = session->point.y;
+	p.direction = direction;
 	p.move_time = session->last_move_time;
 	do_send(&p);
 }
 
 void SESSION::send_add_player_packet(int c_id)
 {
-	auto session = (SESSION*)clients[c_id];
+	auto session = (SESSION*)characters[c_id];
 	SC_ADD_OBJECT_PACKET add_packet;
 	add_packet.id = c_id;
 	strcpy_s(add_packet.name, session->_name);
@@ -80,21 +81,11 @@ void SESSION::send_add_player_packet(int c_id)
 	do_send(&add_packet);
 }
 
-void SESSION::send_chat_packet(int p_id, const char* mess)
-{
-	SC_CHAT_PACKET packet;
-	packet.id = p_id;
-	packet.size = sizeof(packet);
-	packet.type = SC_CHAT;
-	strcpy_s(packet.mess, mess);
-	do_send(&packet);
-}
 
 int get_new_client_id()
 {
 	for (int i = 0; i < MAX_USER; ++i) {
-		//lock_guard <mutex> ll{ clients[i]->_s_lock };
-		if (clients[i]->_state.load() == ST_FREE)
+		if (characters[i]->_state.load() == ST_FREE)
 			return i;
 	}
 	return -1;
@@ -109,8 +100,8 @@ void WakeUpNPC(int npc_id, int waker)
 	if (is_pc(npc_id)) {
 		cout << "ERROR" << endl;
 	}
-	auto NPC = (MONSTER*)clients[npc_id];
-	if (NPC->_is_active) return;
+	auto NPC = (MONSTER*)characters[npc_id];
+	if (NPC->_is_active.load()) return;
 	bool old_state = false;
 	if (false == atomic_compare_exchange_strong(&NPC->_is_active, &old_state, true))
 		return;
@@ -121,23 +112,20 @@ void WakeUpNPC(int npc_id, int waker)
 
 void process_packet(int c_id, char* packet)
 {
-	auto session = (SESSION*)clients[c_id];
+	auto session = (SESSION*)characters[c_id];
 	switch (packet[1]) {
 	case CS_LOGIN: {
 		CS_LOGIN_PACKET* p = reinterpret_cast<CS_LOGIN_PACKET*>(packet);
 		strcpy_s(session->_name, p->name);
 		{
 			//lock_guard<mutex> ll{ session->_s_lock };
-			session->point.x = rand() % W_WIDTH;
-			session->point.y = rand() % W_HEIGHT;
+			session->point.x = rand() % 100;
+			session->point.y = rand() % 100;
 			session->_state.store(ST_INGAME);
 		}
 		session->send_login_info_packet();
-		for (auto& pl : clients) {
-			{
-				//lock_guard<mutex> ll(pl._s_lock);
-				if (ST_INGAME != pl->_state.load()) continue;
-			}
+		for (auto& pl : characters) {
+			if (ST_INGAME != pl->_state.load()) continue;		
 			if (pl->_id == c_id) continue;
 			if (!can_see(c_id, pl->_id)) continue;
 			if (is_pc(pl->_id)) {
@@ -169,22 +157,22 @@ void process_packet(int c_id, char* packet)
 		session->_view_list.s_mutex.lock_shared();
 		unordered_set<int> old_vlist = session->_view_list;
 		session->_view_list.s_mutex.unlock_shared();
-		for (auto& cl : clients) {
+		for (auto& cl : characters) {
 			if (cl->_state.load() != ST_INGAME) continue;
 			if (cl->_id == c_id) continue;
 			if (can_see(c_id, cl->_id))
 				near_list.insert(cl->_id);
 		}
 
-		session->send_move_packet(c_id);
+		session->send_move_packet(c_id, p->direction);
 
 		for (auto& pl : near_list) {
 			if (is_pc(pl)) {
-				auto near_session = (SESSION*)clients[pl];
+				auto near_session = (SESSION*)characters[pl];
 				near_session->_view_list.s_mutex.lock_shared();
 				if (near_session->_view_list.count(c_id)) {
 					near_session->_view_list.s_mutex.unlock_shared();
-					near_session->send_move_packet(c_id);
+					near_session->send_move_packet(c_id, p->direction);
 				}
 				else {
 					near_session->_view_list.s_mutex.unlock_shared();
@@ -201,7 +189,7 @@ void process_packet(int c_id, char* packet)
 			if (0 == near_list.count(pl)) {
 				session->send_remove_player_packet(pl);
 				if (is_pc(pl)) {
-					auto other_session = (SESSION*)clients[pl];
+					auto other_session = (SESSION*)characters[pl];
 					other_session->send_remove_player_packet(c_id);
 				}
 			}
@@ -211,12 +199,23 @@ void process_packet(int c_id, char* packet)
 		session->_view_list.s_mutex.lock_shared();
 		unordered_set<int> near_list = session->_view_list;
 		session->_view_list.s_mutex.unlock_shared();
-		for (auto& pl : near_list) {
-			auto& cpl = clients[pl];
-			if (is_npc(pl) && can_attack(c_id, pl)) {
-				cout << cpl->_id << "Damaged\n";
-				if (cpl->HP <= 0)
-					session->EXP += cpl->EXP;
+		for (auto& obj_id : near_list) {
+			auto& obj = characters[obj_id];
+			if (is_npc(obj_id) && can_attack(c_id, obj_id)) {
+				obj->HP.fetch_sub(50);
+				if (obj->HP.load() <= 0) {
+					bool alive = true;
+					if (false == atomic_compare_exchange_strong(&obj->is_alive, &alive, false))
+						return;
+					session->EXP += obj->EXP;	
+					obj->_view_list.s_mutex.lock_shared();
+					for (auto& player_id : obj->_view_list) {
+						cout << "send remove packet\n";
+						auto session = (SESSION*)characters[player_id];
+						session->send_remove_player_packet(obj_id);
+					}
+					obj->_view_list.s_mutex.unlock_shared();
+				}
 			}
 		}
 	}
@@ -226,44 +225,36 @@ void process_packet(int c_id, char* packet)
 
 void disconnect(int c_id)
 {
-	auto session = (SESSION*)clients[c_id];
+	auto session = (SESSION*)characters[c_id];
 	session->_view_list.s_mutex.lock_shared();
 	unordered_set <int> vl = session->_view_list;
 	session->_view_list.s_mutex.unlock_shared();
 	for (auto& p_id : vl) {
 		if (is_npc(p_id)) continue;
-		auto pl = (SESSION*)clients[p_id];
-		{
-			//lock_guard<mutex> ll(pl._s_lock);
-			if (ST_INGAME != pl->_state.load()) continue;
-		}
+		auto pl = (SESSION*)characters[p_id];
+		if (ST_INGAME != pl->_state.load()) continue;
 		if (pl->_id == c_id) continue;
 		pl->send_remove_player_packet(c_id);
 	}
 	closesocket(session->_socket);
 
-	//lock_guard<mutex> ll(session->_s_lock);
 	session->_state.store(ST_FREE);
 }
 
 void do_npc_random_move(int npc_id)
 {
-	auto npc = (MONSTER*)clients[npc_id];
-	unordered_set<int> old_vl;
-	for (int i = 0; i < MAX_USER; ++i) {
-		auto& obj = clients[i];
-		if (ST_INGAME != obj->_state.load()) continue;
-		if (true == can_see(npc->_id, obj->_id))
-			old_vl.insert(obj->_id);
-	}
+	auto npc = (MONSTER*)characters[npc_id];
+	unordered_set<int> old_vl = npc->_view_list;
+
 
 	int x = npc->point.x;
 	int y = npc->point.y;
-	switch (rand() % 4) {
-	case 0: if (x < (W_WIDTH - 1)) x++; break;
+	short direction = rand() % 4;
+	switch (direction) {
+	case 0: if (y < (W_HEIGHT - 1)) y++; break; 
 	case 1: if (x > 0) x--; break;
-	case 2: if (y < (W_HEIGHT - 1)) y++; break;
-	case 3:if (y > 0) y--; break;
+	case 2: if (y > 0) y--; break;
+	case 3:if (x < (W_WIDTH - 1)) x++; break; 
 	}
 	if (GridMap[x][y]) {
 		npc->point.x = x;
@@ -271,28 +262,27 @@ void do_npc_random_move(int npc_id)
 	}
 
 
-	unordered_set<int> new_vl;
+	my_unordered_set<int> new_vl;
 	for (int i = 0; i < MAX_USER; ++i) {
-		auto& obj = clients[i];
+		auto& obj = characters[i];
 		if (ST_INGAME != obj->_state.load()) continue;
-		//if (true == is_npc(obj->_id)) continue;
 		if (true == can_see(npc->_id, obj->_id))
 			new_vl.insert(obj->_id);
 	}
 
 	for (auto pl : new_vl) {
-		auto session = (SESSION*)clients[pl];
+		auto session = (SESSION*)characters[pl];
 		if (0 == old_vl.count(pl)) {
 			session->send_add_player_packet(npc->_id);
 		}
 		else {
-			session->send_move_packet(npc->_id);
+			session->send_move_packet(npc->_id, direction);
 		}
 	}
 
 	for (auto pl : old_vl) {
 		if (0 == new_vl.count(pl)) {
-			auto session = (SESSION*)clients[pl];
+			auto session = (SESSION*)characters[pl];
 			session->_view_list.s_mutex.lock_shared();
 			if (0 != session->_view_list.count(npc->_id)) {
 				session->_view_list.s_mutex.unlock_shared();
@@ -303,6 +293,7 @@ void do_npc_random_move(int npc_id)
 			}
 		}
 	}
+	npc->_view_list = new_vl;
 }
 
 unordered_map<TILEPOINT, shared_ptr<A_star_Node>, PointHash, PointEqual>::iterator getNode(unordered_map<TILEPOINT, shared_ptr<A_star_Node>, PointHash, PointEqual>& m_List)
@@ -375,7 +366,7 @@ void worker_thread(HANDLE h_iocp)
 		BOOL ret = GetQueuedCompletionStatus(h_iocp, &num_bytes, &key, &over, INFINITE);
 		OVER_EXP* ex_over = reinterpret_cast<OVER_EXP*>(over);
 		if (FALSE == ret) {
-			if (ex_over->_comp_type == OP_ACCEPT) cout << "Accept Error";
+			if (ex_over->_comp_type == OP_ACCEPT) { cout << "Accept Error\n"; exit(-1); }
 			else {
 				cout << "GQCS Error on client[" << key << "]\n";
 				disconnect(static_cast<int>(key));
@@ -394,7 +385,7 @@ void worker_thread(HANDLE h_iocp)
 		case OP_ACCEPT: {
 			int client_id = get_new_client_id();
 			if (client_id != -1) {
-				auto session = (SESSION*)clients[client_id];
+				auto session = (SESSION*)characters[client_id];
 				session->_state.store(ST_ALLOC);
 				session->point.x = session->point.y = 0;
 				session->_id = client_id;
@@ -415,7 +406,7 @@ void worker_thread(HANDLE h_iocp)
 			break;
 		}
 		case OP_RECV: {
-			auto session = (SESSION*)clients[key];
+			auto session = (SESSION*)characters[key];
 			int remain_data = num_bytes + session->_prev_remain;
 			char* p = ex_over->_send_buf;
 			while (remain_data > 0) {
@@ -438,9 +429,18 @@ void worker_thread(HANDLE h_iocp)
 			delete ex_over;
 			break;
 		case OP_NPC_MOVE: {
+			delete ex_over;
+			if (characters[key]->is_alive.load() == false) {
+				cout << static_cast<int>(key) << " Revive Start\n";
+				TIMER_EVENT ev{ static_cast<int>(key), chrono::system_clock::now() + 5s, EV_REVIVE, 0 };
+				timer_queue.push(ev);
+				break;
+			}
+
+
 			bool keep_alive = false;
 			for (int j = 0; j < MAX_USER; ++j) {
-				if (clients[j]->_state.load() != ST_INGAME) continue;
+				if (characters[j]->_state.load() != ST_INGAME) continue;
 				if (can_see(static_cast<int>(key), j)) {
 					keep_alive = true;
 					break;
@@ -452,28 +452,24 @@ void worker_thread(HANDLE h_iocp)
 				timer_queue.push(ev);
 			}
 			else {
-				auto NPC = (MONSTER*)clients[static_cast<int>(key)];
+				auto NPC = (MONSTER*)characters[static_cast<int>(key)];
 				NPC->_is_active = false;
 			}
-			delete ex_over;
-		}
-						break;
-		case OP_AI_HELLO: {
-			//auto NPC = (MONSTER*)clients[key];
-			//NPC->_ll.lock();
-			//auto L = NPC->_L;
-			//lua_getglobal(L, "event_player_move");
-			//lua_pushnumber(L, ex_over->_ai_target_obj);
-			//lua_pcall(L, 1, 0, 0);
-			//lua_pop(L, 1);
-			//NPC->_ll.unlock();
-			//delete ex_over;
 		}
 						break;
 		case OP_NPC_ATTACK: {
-			auto NPC = (MONSTER*)clients[key];
+			delete ex_over;
+			if (characters[key]->is_alive.load() == false) {
+				cout << static_cast<int>(key) << " Revive Start\n";
+				TIMER_EVENT ev{ static_cast<int>(key), chrono::system_clock::now() + 5s, EV_REVIVE, 0 };
+				timer_queue.push(ev);
+				break;
+			}
+
+
+			auto NPC = (MONSTER*)characters[key];
 			if (can_attack(static_cast<int>(key), NPC->target_id)) {
-				clients[NPC->target_id]->HP -= 50;
+				characters[NPC->target_id]->HP.fetch_sub(50);
 				TIMER_EVENT ev{ static_cast<int>(key), chrono::system_clock::now() + 1s, EV_ATTACK, 0 };
 				timer_queue.push(ev);
 			}
@@ -492,7 +488,7 @@ int API_get_x(lua_State* L)
 	int user_id =
 		(int)lua_tointeger(L, -1);
 	lua_pop(L, 2);
-	int x = clients[user_id]->point.x;
+	int x = characters[user_id]->point.x;
 	lua_pushnumber(L, x);
 	return 1;
 }
@@ -502,7 +498,7 @@ int API_get_y(lua_State* L)
 	int user_id =
 		(int)lua_tointeger(L, -1);
 	lua_pop(L, 2);
-	int y = clients[user_id]->point.y;
+	int y = characters[user_id]->point.y;
 	lua_pushnumber(L, y);
 	return 1;
 }
@@ -515,7 +511,7 @@ int API_SendMessage(lua_State* L)
 
 	lua_pop(L, 4);
 
-	auto session = (SESSION*)clients[user_id];
+	auto session = (SESSION*)characters[user_id];
 	session->send_chat_packet(my_id, mess);
 	return 0;
 }
@@ -540,7 +536,7 @@ void InitializeNPC()
 	cout << "NPC intialize begin.\n";
 	for (int i = 0; i < MAX_USER; ++i) {
 		SESSION* PLAYER = new SESSION();
-		clients[i] = PLAYER;
+		characters[i] = PLAYER;
 	}
 
 	for (int i = MAX_USER; i < MAX_USER + MAX_NPC; ++i) {
@@ -565,8 +561,8 @@ void InitializeNPC()
 		lua_register(L, "API_SendMessage", API_SendMessage);
 		lua_register(L, "API_get_x", API_get_x);
 		lua_register(L, "API_get_y", API_get_y);
-		clients[i] = NPC;
-		clients[i]->_id = i;
+		characters[i] = NPC;
+		characters[i]->_id = i;
 
 	}
 	cout << "NPC initialize end.\n";
@@ -584,15 +580,17 @@ void do_timer()
 				continue;
 			}
 			switch (ev.event_id) {
-			case EV_RANDOM_MOVE:
+			case EV_RANDOM_MOVE: {
 				OVER_EXP* ov = new OVER_EXP;
 				ov->_comp_type = OP_NPC_MOVE;
 				PostQueuedCompletionStatus(h_iocp, 1, ev.obj_id, &ov->_over);
+			}
 				break;
-			case EV_ATTACK:
+			case EV_ATTACK: {
 				OVER_EXP* ov = new OVER_EXP;
 				ov->_comp_type = OP_NPC_ATTACK;
 				PostQueuedCompletionStatus(h_iocp, 1, ev.obj_id, &ov->_over);
+			}
 				break;
 			}
 			continue;		
@@ -637,7 +635,7 @@ int main()
 	timer_thread.join();
 	for (auto& th : worker_threads)
 		th.join();
-	for (auto& obj : clients)
+	for (auto& obj : characters)
 		delete obj;
 	closesocket(listenSocket);
 	WSACleanup();
