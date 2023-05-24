@@ -1,9 +1,12 @@
 ﻿#define SFML_STATIC 1
+#define _CRT_SECURE_NO_WARNINGS
 #include <SFML/Graphics.hpp>
 #include <SFML/Network.hpp>
 #include <iostream>
 #include <unordered_map>
 #include <Windows.h>
+#include <locale>
+#include <codecvt>
 #include <chrono>
 #include <fstream>
 #include <array>
@@ -33,9 +36,27 @@ int g_myid;
 sf::RenderWindow* g_window;
 sf::Font g_font;
 sf::Text Level_Text;
+sf::Text Login_ID_Text;
+sf::Text Login_PW_Text;
 bool on_chat = false;
+
 char m_mess[CHAT_SIZE]{ "" };
+char m_login_string[2][NAME_SIZE]{ "" };
+//array<array<char, NAME_SIZE>, 2> m_login_string{ "" };
+//char m_password[NAME_SIZE]{ "" };
 unsigned short chat_length = 0;
+unsigned short login_state = 0;
+
+
+void ConvertCharArrayToWideCharArray(const char* source, size_t sourceSize, wchar_t* destination, size_t destinationSize)
+{
+	std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
+	std::wstring wideString = converter.from_bytes(source, source + sourceSize);
+
+	// 변환된 wchar_t 문자열을 대상 배열에 복사합니다.
+	wcsncpy(destination, wideString.c_str(), destinationSize - 1);
+	destination[destinationSize - 1] = L'\0'; // wchar_t 배열의 끝을 표시하는 null 문자를 추가합니다.
+}
 
 class OBJECT {
 private:
@@ -51,6 +72,7 @@ public:
 	short	HP = 200;
 	int		Exp = 0;
 	int		Level = 0;
+
 	char name[NAME_SIZE];
 	OBJECT(sf::Texture& t, int x, int y, int x2, int y2) {
 		m_showing = false;
@@ -132,12 +154,14 @@ OBJECT white_tile;
 OBJECT black_tile;
 OBJECT HPBAR[2];
 OBJECT Level;
+OBJECT Login_UI;
 
 sf::Texture* board;
 sf::Texture* pieces;
 sf::Texture* monsters;
 sf::Texture* hp_bar[2];
 sf::Texture* lv;
+sf::Texture* login_ui;
 
 void client_initialize()
 {
@@ -146,12 +170,13 @@ void client_initialize()
 	monsters = new sf::Texture;
 	lv = new sf::Texture;
 	hp_bar[0] = new sf::Texture;
+	login_ui = new sf::Texture;
 	board->loadFromFile("tilemap.bmp");
 	pieces->loadFromFile("character.png");
 	monsters->loadFromFile("skeleton.png");
 	lv->loadFromFile("L.png");
 	hp_bar[0]->loadFromFile("HP_ON.png");
-
+	login_ui->loadFromFile("loginUI.png");
 	if (false == g_font.loadFromFile("cour.ttf")) {
 		cout << "Font Loading Error!\n";
 		exit(-1);
@@ -160,6 +185,19 @@ void client_initialize()
 	black_tile = OBJECT{ *board, 13, 8, TILE_WIDTH, TILE_WIDTH };
 
 	Level = OBJECT{ *lv, 0, 0, 100, 100 };
+	Login_UI = OBJECT{ *login_ui, 0, 0, 300, 80 };
+	Login_UI.a_move(350, 800);
+
+	Login_ID_Text.setFont(g_font);
+	Login_ID_Text.setCharacterSize(60);
+	Login_ID_Text.setFillColor(sf::Color(0, 0, 0));
+	Login_ID_Text.setPosition(250, 300);
+
+	Login_PW_Text.setFont(g_font);
+	Login_PW_Text.setCharacterSize(60);
+	Login_PW_Text.setFillColor(sf::Color(0, 0, 0));
+	Login_PW_Text.setPosition(250, 600);
+
 
 	Level_Text.setFont(g_font);
 	Level_Text.setCharacterSize(60);
@@ -211,8 +249,16 @@ void ProcessPacket(char* ptr)
 		g_left_x = packet->point.x - SCREEN_WIDTH / 2;
 		g_top_y = packet->point.y - SCREEN_HEIGHT / 2;
 		avatar.show();
+		login_state = 3;
 	}
 	break;
+
+	//case SC_LOGIN_OK:
+	//{
+	//	SC_LOGIN_OK_PACKET* packet = reinterpret_cast<SC_LOGIN_OK_PACKET*>(ptr);
+	//	g_myid = packet->id;
+	//	avatar.id = g_myid;
+	//}
 
 	case SC_ADD_OBJECT:
 	{
@@ -314,6 +360,40 @@ void process_data(char* net_buf, size_t io_byte)
 	}
 }
 
+void login_scene()
+{
+	char net_buf[BUF_SIZE];
+	size_t	received;
+	auto recv_result = s_socket.receive(net_buf, BUF_SIZE, received);
+	if (recv_result == sf::Socket::Error)
+	{
+		wcout << L"Recv ����!";
+		exit(-1);
+	}
+	if (recv_result == sf::Socket::Disconnected) {
+		wcout << L"Disconnected\n";
+		exit(-1);
+	}
+	if (recv_result != sf::Socket::NotReady)
+		if (received > 0) process_data(net_buf, received);
+
+
+
+	for (int i = 0; i < SCREEN_WIDTH; ++i)
+		for (int j = 0; j < SCREEN_HEIGHT; ++j)
+		{
+			white_tile.a_move(TILE_WIDTH * i, TILE_WIDTH * j);
+			white_tile.a_draw();
+		}
+
+	Login_ID_Text.setString(m_login_string[0]);
+	Login_PW_Text.setString(m_login_string[1]);
+
+	g_window->draw(Login_ID_Text);
+	g_window->draw(Login_PW_Text);
+	Login_UI.a_draw();
+}
+
 void client_main()
 {
 	char net_buf[BUF_SIZE];
@@ -373,25 +453,110 @@ int main()
 		exit(-1);
 	}
 
-	client_initialize();
-	CS_LOGIN_PACKET p;
-	p.size = sizeof(p);
-	p.type = CS_LOGIN;
-
-	string player_name{ "P" };
-	player_name += to_string(GetCurrentProcessId());
-
-	strcpy_s(p.name, player_name.c_str());
-	send_packet(&p);
-	avatar.set_name(p.name);
 
 	sf::RenderWindow window(sf::VideoMode(WINDOW_WIDTH, WINDOW_HEIGHT), "2D CLIENT");
 	g_window = &window;
+	client_initialize();
 
 	while (window.isOpen())
 	{
-		break;
+		if (login_state > 2) break;
+		sf::Event event;
+		while (window.pollEvent(event))
+		{
+			if (event.type == sf::Event::Closed)
+				window.close();
+
+			if (event.type == sf::Event::MouseButtonPressed && login_state == 2) {
+				int mouseX = event.mouseButton.x;
+				int mouseY = event.mouseButton.y;
+				if (mouseX >= 350 && mouseX <= 650) {
+					if (mouseY >= 800 && mouseY < 840) {
+						wchar_t* wcharArray = new wchar_t[NAME_SIZE] {L""};
+						CS_LOGIN_PACKET p;
+						p.size = sizeof(p);
+						p.type = CS_LOGIN;
+
+						ConvertCharArrayToWideCharArray(m_login_string[0], sizeof(m_login_string[0]), wcharArray, sizeof(wcharArray));
+						wcscpy_s(p.id, sizeof(p.id) / sizeof(p.id[0]), wcharArray);
+
+						memset(wcharArray, 0, NAME_SIZE * sizeof(wchar_t));
+
+						ConvertCharArrayToWideCharArray(m_login_string[1], sizeof(m_login_string[1]), wcharArray, sizeof(wcharArray));
+						wcscpy_s(p.password, sizeof(p.password) / sizeof(p.password[0]), wcharArray);
+
+
+						send_packet(&p);
+						for (int i = 0; i < 2; ++i) {
+							memset(m_login_string[i], 0, NAME_SIZE);
+						}
+						cout << "SENT LOGIN PACKET\n";
+						delete[] wcharArray;
+					}
+					else if (mouseY >= 840 && mouseY <= 880) {
+						wchar_t* wcharArray = new wchar_t[NAME_SIZE] {L""};
+						CS_LOGIN_PACKET p;
+						p.size = sizeof(p);
+						p.type = CS_SIGNUP;
+
+						ConvertCharArrayToWideCharArray(m_login_string[0], sizeof(m_login_string[0]), wcharArray, sizeof(wcharArray));
+						wcscpy_s(p.id, sizeof(p.id) / sizeof(p.id[0]), wcharArray);
+
+						memset(wcharArray, 0, NAME_SIZE * sizeof(wchar_t));
+
+						ConvertCharArrayToWideCharArray(m_login_string[1], sizeof(m_login_string[1]), wcharArray, sizeof(wcharArray));
+						wcscpy_s(p.password, sizeof(p.password) / sizeof(p.password[0]), wcharArray);
+
+
+						send_packet(&p);
+						for (int i = 0; i < 2; ++i) {
+							memset(m_login_string[i], 0, NAME_SIZE);
+						}
+						cout << "SENT SIGNUP PACKET\n";
+						delete[] wcharArray;
+					}
+				}
+			}
+			if (event.type == sf::Event::KeyPressed && login_state < 2) {
+				if (event.key.code >= sf::Keyboard::A && event.key.code <= sf::Keyboard::Z)
+				{
+					char inputChar = static_cast<char>('a' + (event.key.code - sf::Keyboard::A));
+					m_login_string[login_state][chat_length++] = inputChar;
+				}
+				else if (event.key.code >= sf::Keyboard::Num0 && event.key.code <= sf::Keyboard::Num9)
+				{
+					char inputChar = static_cast<char>('0' + (event.key.code - sf::Keyboard::Num0));
+					m_login_string[login_state][chat_length++] = inputChar;
+				}
+				else if (event.key.code == sf::Keyboard::Backspace)
+				{
+					if (chat_length) {
+						m_login_string[login_state][--chat_length] = '\0';
+					}
+				}
+				else if (event.key.code == sf::Keyboard::Enter)
+				{
+					login_state++;
+					chat_length = 0;
+				}
+				avatar.set_chat(m_mess);
+			}
+		}
+		window.clear();
+		login_scene();
+		window.display();
 	}
+	//CS_LOGIN_PACKET p;
+	//p.size = sizeof(p);
+	//p.type = CS_LOGIN;
+
+	//string player_name{ "P" };
+	//player_name += to_string(GetCurrentProcessId());
+
+	//strcpy_s(p.name, player_name.c_str());
+	//send_packet(&p);
+	//avatar.set_name(p.name);
+
 
 	while (window.isOpen())
 	{
@@ -400,11 +565,12 @@ int main()
 		{
 			if (event.type == sf::Event::Closed)
 				window.close();
+
 			if (event.type == sf::Event::KeyPressed) {
 				if (on_chat) {
 					if (event.key.code >= sf::Keyboard::A && event.key.code <= sf::Keyboard::Z)
 					{
-						char inputChar = static_cast<char>('A' + (event.key.code - sf::Keyboard::A));
+						char inputChar = static_cast<char>('a' + (event.key.code - sf::Keyboard::A));
 						// 알파벳 키 입력 처리 로직
 						m_mess[chat_length++] = inputChar;
 					}
@@ -416,11 +582,17 @@ int main()
 					}
 					else if (event.key.code == sf::Keyboard::Backspace)
 					{
-						chat_length--;
-						m_mess[chat_length] = '\0';
+						if (chat_length) {
+							m_mess[--chat_length] = '\0';
+						}
 					}
 					else if (event.key.code == sf::Keyboard::Enter)
 					{
+						CS_CHAT_PACKET p;
+						p.size = sizeof(p);
+						p.type = CS_CHAT;
+						strcpy_s(p.mess, sizeof(m_mess), m_mess);
+						send_packet(&p);
 						on_chat = false;
 						chat_length = 0;
 						memset(m_mess, 0, CHAT_SIZE);

@@ -7,7 +7,6 @@ class SESSION : public CHARACTER {
 public:
 	SOCKET _socket;
 	int		_prev_remain;
-	int		last_move_time;
 public:
 	SESSION()
 	{
@@ -42,8 +41,34 @@ public:
 		p.point.y = point.y;
 		do_send(&p);
 	}
-	void send_move_packet(int c_id, char direction);
-	void send_add_player_packet(int c_id);
+	void send_move_packet(CHARACTER* obj, char direction)
+	{
+		//auto session = (SESSION*)characters[c_id];
+		SC_MOVE_OBJECT_PACKET p;
+		p.id = obj->_id;
+		p.size = sizeof(SC_MOVE_OBJECT_PACKET);
+		p.type = SC_MOVE_OBJECT;
+		p.point.x = obj->point.x;
+		p.point.y = obj->point.y;
+		p.direction = direction;
+		p.move_time = obj->last_move_time;
+		do_send(&p);
+	}
+
+	void send_add_player_packet(CHARACTER* obj)
+	{
+		SC_ADD_OBJECT_PACKET add_packet;
+		add_packet.id = obj->_id;
+		strcpy_s(add_packet.name, obj->_name);
+		add_packet.size = sizeof(add_packet);
+		add_packet.type = SC_ADD_OBJECT;
+		add_packet.point.x = obj->point.x;
+		add_packet.point.y = obj->point.y;
+		_view_list.s_mutex.lock();
+		_view_list.insert(obj->_id);
+		_view_list.s_mutex.unlock();
+		do_send(&add_packet);
+	}
 
 
 	void send_chat_packet(int c_id, const char* mess)
@@ -56,6 +81,24 @@ public:
 		do_send(&packet);
 	}
 
+	void send_loginOK_packet()
+	{
+		SC_LOGIN_OK_PACKET packet;
+		packet.size = sizeof(packet);
+		packet.type = SC_LOGIN_OK;
+		packet.id = _id;
+		packet.HP = HP;
+		packet.EXP = EXP;
+		do_send(&packet);
+	}
+
+	void send_loginFail_packet()
+	{
+		SC_LOGIN_FAIL_PACKET packet;
+		packet.size = sizeof(packet);
+		packet.type = SC_LOGIN_FAIL;
+		do_send(&packet);
+	}
 
 	void send_dead_packet(int c_id)
 	{

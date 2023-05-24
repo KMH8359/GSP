@@ -2,8 +2,12 @@
 #include "stdafx.h"
 #include "Monster.h"
 #include "Session.h"
+#include <sqlext.h>
+#include <sql.h>
+#include <sqltypes.h>
 
 concurrent_priority_queue<TIMER_EVENT> timer_queue;
+concurrent_queue<DB_EVENT> db_queue;
 HANDLE h_iocp;
 array<CHARACTER*, MAX_USER + MAX_NPC> characters;
 array<array<bool, W_WIDTH>, W_HEIGHT> GridMap;
@@ -24,6 +28,137 @@ TILEPOINT vec[8]{
 	TILEPOINT(1,1)
 };
 
+
+void HandleDiagnosticRecord(SQLHANDLE hHandle, SQLSMALLINT hType, RETCODE RetCode) {
+	SQLSMALLINT iRec = 0;
+	SQLINTEGER  iError;
+	WCHAR       wszMessage[1000];
+	WCHAR       wszState[SQL_SQLSTATE_SIZE + 1];
+
+	if (RetCode == SQL_INVALID_HANDLE)
+	{
+		fwprintf(stderr, L"Invalid handle!\n");
+		return;
+	}
+	while (SQLGetDiagRec(hType, hHandle, ++iRec, wszState, &iError, wszMessage,
+		(SQLSMALLINT)(sizeof(wszMessage) / sizeof(WCHAR)), (SQLSMALLINT*)NULL) == SQL_SUCCESS)
+	{
+		// Hide data truncated.. 
+		if (wcsncmp(wszState, L"01004", 5))
+		{
+			fwprintf(stderr, L"[%5.5s] %s (%d)\n", wszState, wszMessage, iError);
+		}
+	}
+}
+
+void DB_Thread()
+{
+	SQLHENV henv;
+	SQLHDBC hdbc;
+	SQLHSTMT hstmt = 0;
+	SQLRETURN retcode;
+	//SQLWCHAR szUser_ID[IDPW_SIZE], szUser_PWD[IDPW_SIZE];
+	SQLINTEGER User_HP, User_EXP;
+
+	setlocale(LC_ALL, "korean");
+
+	// Allocate environment handle  
+	retcode = SQLAllocHandle(SQL_HANDLE_ENV, SQL_NULL_HANDLE, &henv);
+
+	// Set the ODBC version environment attribute  
+	if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
+		retcode = SQLSetEnvAttr(henv, SQL_ATTR_ODBC_VERSION, (SQLPOINTER*)SQL_OV_ODBC3, 0);
+
+		// Allocate connection handle  
+		if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
+			retcode = SQLAllocHandle(SQL_HANDLE_DBC, henv, &hdbc);
+
+
+			// Set login timeout to 5 seconds  
+			if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
+				SQLSetConnectAttr(hdbc, SQL_LOGIN_TIMEOUT, (SQLPOINTER)5, 0);
+
+				SQLWCHAR* connectionString = (SQLWCHAR*)L"DRIVER=SQL Server;SERVER=14.36.243.161;DATABASE=SimpleMMORPG; UID=dbAdmin; PWD=2018180005;";
+
+				retcode = SQLDriverConnect(hdbc, NULL, connectionString, SQL_NTS, NULL, 1024, NULL, SQL_DRIVER_NOPROMPT);
+
+				// Allocate statement handle  
+				if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
+					retcode = SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt);
+					printf("ODBC Connect OK \n");
+				}
+				else
+					HandleDiagnosticRecord(hdbc, SQL_HANDLE_DBC, retcode);
+
+				while (1)
+				{
+					DB_EVENT ev;
+					if (db_queue.try_pop(ev)) {
+						cout << "GET REQUEST\n";
+						SQLWCHAR* param1 = ev.user_id;
+						SQLWCHAR* param2 = ev.user_password;
+						switch (ev._event) {
+						case EV_SIGNUP:
+							retcode = SQLPrepare(hstmt, (SQLWCHAR*)L"{CALL sign_up(?, ?)}", SQL_NTS);
+							if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
+								SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_WCHAR, SQL_WCHAR, 10, 0, (SQLPOINTER)param1, 0, NULL);
+								SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_WCHAR, SQL_WCHAR, 10, 0, (SQLPOINTER)param2, 0, NULL);
+
+								retcode = SQLExecute(hstmt);
+								if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
+									printf("SIGNUP OK \n");
+								}
+								else {
+									printf("SIGNUP FAILED \n");
+									HandleDiagnosticRecord(hdbc, SQL_HANDLE_DBC, retcode);
+								}
+							}
+							else {
+								printf("SQLPrepare failed \n");
+								HandleDiagnosticRecord(hdbc, SQL_HANDLE_DBC, retcode);
+							}
+							break;
+						case EV_SIGNIN:
+							retcode = SQLPrepare(hstmt, (SQLWCHAR*)L"{CALL sign_in(?, ?)}", SQL_NTS);
+							if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
+								SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_WCHAR, SQL_WCHAR, 10, 0, (SQLPOINTER)param1, 0, NULL);
+								SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_WCHAR, SQL_WCHAR, 10, 0, (SQLPOINTER)param2, 0, NULL);
+
+								retcode = SQLExecute(hstmt);
+								auto session = (SESSION*)characters[ev.session_id];
+								if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
+									SQLBindCol(hstmt, 3, SQL_C_LONG, &session->HP, 0, NULL);
+									SQLBindCol(hstmt, 4, SQL_C_LONG, &session->EXP, 0, NULL);
+									OVER_EXP* ov = new OVER_EXP;
+									ov->_comp_type = OP_LOGIN_OK;
+									PostQueuedCompletionStatus(h_iocp, 1, ev.session_id, &ov->_over);
+								}
+								else {
+									//session->send_loginFail_packet();
+									printf("LOGIN FAILED \n");
+									HandleDiagnosticRecord(hdbc, SQL_HANDLE_DBC, retcode);
+								}
+							}
+							else {
+								printf("SQLPrepare failed \n");
+								HandleDiagnosticRecord(hdbc, SQL_HANDLE_DBC, retcode);
+							}
+							break;
+						}
+					}
+					else this_thread::sleep_for(100ms);
+				}
+
+				if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
+					SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+				}
+				SQLDisconnect(hdbc);
+			}
+			SQLFreeHandle(SQL_HANDLE_DBC, hdbc);
+		}
+		SQLFreeHandle(SQL_HANDLE_ENV, henv);
+	}
+}
 bool point_compare(TILEPOINT p1, TILEPOINT p2)
 {
 	return p1.x == p2.x && p1.y == p2.y;
@@ -41,7 +176,7 @@ bool is_npc(int object_id)
 
 bool can_see(int from, int to)
 {
-	if (abs(characters[from]->point.x - characters[to]->point.x) > VIEW_RANGE) return false;
+	if (abs(characters[from]->point.x - characters[to]->point.x) > VIEW_RANGE || characters[to]->is_alive == false) return false;
 	return abs(characters[from]->point.y - characters[to]->point.y) <= VIEW_RANGE;
 }
 
@@ -50,37 +185,6 @@ bool can_attack(int from, int to)
 	if (abs(characters[from]->point.x - characters[to]->point.x) > ATTACK_RANGE) return false;
 	return abs(characters[from]->point.y - characters[to]->point.y) <= ATTACK_RANGE;
 }
-
-void SESSION::send_move_packet(int c_id, char direction)
-{
-	auto session = (SESSION*)characters[c_id];
-	SC_MOVE_OBJECT_PACKET p;
-	p.id = c_id;
-	p.size = sizeof(SC_MOVE_OBJECT_PACKET);
-	p.type = SC_MOVE_OBJECT;
-	p.point.x = session->point.x;
-	p.point.y = session->point.y;
-	p.direction = direction;
-	p.move_time = session->last_move_time;
-	do_send(&p);
-}
-
-void SESSION::send_add_player_packet(int c_id)
-{
-	auto session = (SESSION*)characters[c_id];
-	SC_ADD_OBJECT_PACKET add_packet;
-	add_packet.id = c_id;
-	strcpy_s(add_packet.name, session->_name);
-	add_packet.size = sizeof(add_packet);
-	add_packet.type = SC_ADD_OBJECT;
-	add_packet.point.x = session->point.x;
-	add_packet.point.y = session->point.y;
-	_view_list.s_mutex.lock();
-	_view_list.insert(c_id);
-	_view_list.s_mutex.unlock();
-	do_send(&add_packet);
-}
-
 
 int get_new_client_id()
 {
@@ -114,29 +218,49 @@ void process_packet(int c_id, char* packet)
 {
 	auto session = (SESSION*)characters[c_id];
 	switch (packet[1]) {
+	//case CS_LOGIN: {
+	//	CS_LOGIN_PACKET* p = reinterpret_cast<CS_LOGIN_PACKET*>(packet);
+	//	strcpy_s(session->_name, p->name);
+	//	{
+	//		//lock_guard<mutex> ll{ session->_s_lock };
+	//		session->point.x = rand() % 100;
+	//		session->point.y = rand() % 100;
+	//		session->_state.store(ST_INGAME);
+	//	}
+	//	session->send_login_info_packet();
+	//	for (auto& pl : characters) {
+	//		if (ST_INGAME != pl->_state.load()) continue;
+	//		if (pl->_id == c_id) continue;
+	//		if (!can_see(c_id, pl->_id)) continue;
+	//		if (is_pc(pl->_id)) {
+	//			auto other_session = (SESSION*)pl;
+	//			other_session->send_add_player_packet(session);
+	//		}
+	//		else WakeUpNPC(pl->_id, c_id);
+	//		session->send_add_player_packet(characters[pl->_id]);
+	//	}
+	//	break;
+	//}
 	case CS_LOGIN: {
 		CS_LOGIN_PACKET* p = reinterpret_cast<CS_LOGIN_PACKET*>(packet);
-		strcpy_s(session->_name, p->name);
-		{
-			//lock_guard<mutex> ll{ session->_s_lock };
-			session->point.x = rand() % 100;
-			session->point.y = rand() % 100;
-			session->_state.store(ST_INGAME);
-		}
-		session->send_login_info_packet();
-		for (auto& pl : characters) {
-			if (ST_INGAME != pl->_state.load()) continue;		
-			if (pl->_id == c_id) continue;
-			if (!can_see(c_id, pl->_id)) continue;
-			if (is_pc(pl->_id)) {
-				auto other_session = (SESSION*)pl;
-				other_session->send_add_player_packet(c_id);
-			}
-			else WakeUpNPC(pl->_id, c_id);
-			session->send_add_player_packet(pl->_id);
-		}
-		break;
+		DB_EVENT ev;
+		ev._event = EV_SIGNIN;
+		wcscpy_s(ev.user_id, sizeof(ev.user_id) / sizeof(wchar_t), p->id);
+		wcscpy_s(ev.user_password, sizeof(ev.user_password) / sizeof(wchar_t), p->password);
+		ev.session_id = c_id;
+		db_queue.push(ev);
 	}
+				 break;
+	case CS_SIGNUP: {
+		CS_LOGIN_PACKET* p = reinterpret_cast<CS_LOGIN_PACKET*>(packet);
+		DB_EVENT ev;
+		ev._event = EV_SIGNUP;
+		wcscpy_s(ev.user_id, sizeof(ev.user_id) / sizeof(wchar_t), p->id);
+		wcscpy_s(ev.user_password, sizeof(ev.user_password) / sizeof(wchar_t), p->password);
+		ev.session_id = c_id;
+		db_queue.push(ev);
+	}
+				  break;
 	case CS_MOVE: {
 		CS_MOVE_PACKET* p = reinterpret_cast<CS_MOVE_PACKET*>(packet);
 		session->last_move_time = p->move_time;
@@ -164,7 +288,7 @@ void process_packet(int c_id, char* packet)
 				near_list.insert(cl->_id);
 		}
 
-		session->send_move_packet(c_id, p->direction);
+		session->send_move_packet(session, p->direction);
 
 		for (auto& pl : near_list) {
 			if (is_pc(pl)) {
@@ -172,17 +296,17 @@ void process_packet(int c_id, char* packet)
 				near_session->_view_list.s_mutex.lock_shared();
 				if (near_session->_view_list.count(c_id)) {
 					near_session->_view_list.s_mutex.unlock_shared();
-					near_session->send_move_packet(c_id, p->direction);
+					near_session->send_move_packet(session, p->direction);
 				}
 				else {
 					near_session->_view_list.s_mutex.unlock_shared();
-					near_session->send_add_player_packet(c_id);
+					near_session->send_add_player_packet(session);
 				}
 			}
 			else WakeUpNPC(pl, c_id);
 
 			if (old_vlist.count(pl) == 0)
-				session->send_add_player_packet(pl);
+				session->send_add_player_packet(characters[pl]);
 		}
 
 		for (auto& pl : old_vlist)
@@ -193,6 +317,18 @@ void process_packet(int c_id, char* packet)
 					other_session->send_remove_player_packet(c_id);
 				}
 			}
+	}
+				break;
+	case CS_CHAT: {
+		CS_CHAT_PACKET* p = reinterpret_cast<CS_CHAT_PACKET*>(packet);
+		session->_view_list.s_mutex.lock_shared();
+		unordered_set<int> near_list = session->_view_list;
+		session->_view_list.s_mutex.unlock_shared();
+		for (auto& obj_id : near_list) {
+			if (is_npc(obj_id)) continue;
+			auto other_session = (SESSION*)characters[obj_id];
+			other_session->send_chat_packet(session->_id, p->mess);
+		}
 	}
 				break;
 	case CS_ATTACK: {
@@ -273,10 +409,10 @@ void do_npc_random_move(int npc_id)
 	for (auto pl : new_vl) {
 		auto session = (SESSION*)characters[pl];
 		if (0 == old_vl.count(pl)) {
-			session->send_add_player_packet(npc->_id);
+			session->send_add_player_packet(characters[npc->_id]);
 		}
 		else {
-			session->send_move_packet(npc->_id, direction);
+			session->send_move_packet(characters[npc->_id], direction);
 		}
 	}
 
@@ -331,14 +467,12 @@ TILEPOINT Trace_Player(TILEPOINT origin, TILEPOINT destination)
 	{
 		auto iter = getNode(openlist);
 		S_Node = (*iter).second;
-		cout << S_Node->F << endl;
 		if (point_compare(S_Node->Pos, destination))
 		{
 			while (S_Node->parent != nullptr)
 			{
 				if (point_compare(S_Node->parent->Pos, origin))
 				{
-					cout << S_Node->Pos.x << ", " << S_Node->Pos.y << endl;
 					return S_Node->Pos;
 				}
 				S_Node = S_Node->parent;
@@ -428,11 +562,32 @@ void worker_thread(HANDLE h_iocp)
 		case OP_SEND:
 			delete ex_over;
 			break;
+		case OP_LOGIN_OK: 
+		{
+			auto session = (SESSION*)characters[static_cast<int>(key)];
+			session->point.x = rand() % W_WIDTH;
+			session->point.y = rand() % W_HEIGHT;
+			session->_state.store(ST_INGAME);
+			session->send_login_info_packet();
+			for (auto& pl : characters) {
+				if (ST_INGAME != pl->_state.load()) continue;
+				if (pl->_id == session->_id) continue;
+				if (!can_see(session->_id, pl->_id)) continue;
+				if (is_pc(pl->_id)) {
+					auto other_session = (SESSION*)pl;
+					other_session->send_add_player_packet(session);
+				}
+				else WakeUpNPC(pl->_id, session->_id);
+				session->send_add_player_packet(characters[pl->_id]);
+			}
+			delete ex_over;
+			break;
+		}
 		case OP_NPC_MOVE: {
 			delete ex_over;
 			if (characters[key]->is_alive.load() == false) {
 				cout << static_cast<int>(key) << " Revive Start\n";
-				TIMER_EVENT ev{ static_cast<int>(key), chrono::system_clock::now() + 5s, EV_REVIVE, 0 };
+				TIMER_EVENT ev{ static_cast<int>(key), chrono::system_clock::now() + 30s, EV_REVIVE, 0 };
 				timer_queue.push(ev);
 				break;
 			}
@@ -461,7 +616,7 @@ void worker_thread(HANDLE h_iocp)
 			delete ex_over;
 			if (characters[key]->is_alive.load() == false) {
 				cout << static_cast<int>(key) << " Revive Start\n";
-				TIMER_EVENT ev{ static_cast<int>(key), chrono::system_clock::now() + 5s, EV_REVIVE, 0 };
+				TIMER_EVENT ev{ static_cast<int>(key), chrono::system_clock::now() + 30s, EV_REVIVE, 0 };
 				timer_queue.push(ev);
 				break;
 			}
@@ -575,8 +730,8 @@ void do_timer()
 		auto current_time = chrono::system_clock::now();
 		if (true == timer_queue.try_pop(ev)) {
 			if (ev.wakeup_time > current_time) {
-				timer_queue.push(ev);	
-				this_thread::sleep_for(1ms);  
+				timer_queue.push(ev);
+				this_thread::sleep_for(1ms);
 				continue;
 			}
 			switch (ev.event_id) {
@@ -585,22 +740,32 @@ void do_timer()
 				ov->_comp_type = OP_NPC_MOVE;
 				PostQueuedCompletionStatus(h_iocp, 1, ev.obj_id, &ov->_over);
 			}
-				break;
+							   break;
 			case EV_ATTACK: {
 				OVER_EXP* ov = new OVER_EXP;
 				ov->_comp_type = OP_NPC_ATTACK;
 				PostQueuedCompletionStatus(h_iocp, 1, ev.obj_id, &ov->_over);
 			}
-				break;
+						  break;
+			case EV_REVIVE: {
+				characters[ev.obj_id]->is_alive.store(true);
+				OVER_EXP* ov = new OVER_EXP;
+				ov->_comp_type = OP_NPC_MOVE;
+				PostQueuedCompletionStatus(h_iocp, 1, ev.obj_id, &ov->_over);
 			}
-			continue;		
+							   break;
+			}
+			continue;
 		}
-		this_thread::sleep_for(1ms);  
+		this_thread::sleep_for(1ms);
 	}
 }
 
 int main()
 {
+	wcout.imbue(locale("korean"));
+	setlocale(LC_ALL, "korean");
+
 	WSADATA WSAData;
 	WSAStartup(MAKEWORD(2, 2), &WSAData);
 	listenSocket = WSASocket(AF_INET, SOCK_STREAM, 0, NULL, 0, WSA_FLAG_OVERLAPPED);
@@ -632,7 +797,9 @@ int main()
 	for (int i = 0; i < num_threads; ++i)
 		worker_threads.emplace_back(worker_thread, h_iocp);
 	thread timer_thread{ do_timer };
+	thread db_thread{ DB_Thread };
 	timer_thread.join();
+	db_thread.join();
 	for (auto& th : worker_threads)
 		th.join();
 	for (auto& obj : characters)

@@ -12,6 +12,7 @@
 #include <unordered_map>
 #include <atomic>
 #include <concurrent_priority_queue.h>
+#include <concurrent_queue.h>
 #include <concurrent_unordered_set.h>
 #include <fstream>
 
@@ -32,12 +33,12 @@ extern "C"
 using namespace std;
 using namespace concurrency;
 
-constexpr int VIEW_RANGE = 5;
+constexpr int VIEW_RANGE = 15;
 constexpr int ATTACK_RANGE = 1;
 
 constexpr int PORT_NUM = 4000;
 constexpr int BUF_SIZE = 200;
-constexpr int NAME_SIZE = 20;
+constexpr int NAME_SIZE = 10;
 constexpr int CHAT_SIZE = 100;
 
 constexpr int MAX_USER = 10000;
@@ -59,6 +60,14 @@ struct TIMER_EVENT {
 	}
 };
 
+enum DB_EVENT_TYPE { EV_SIGNIN, EV_SIGNUP };
+struct DB_EVENT {
+	unsigned short session_id = -1;
+	wchar_t user_id[NAME_SIZE]{};
+	wchar_t user_password[NAME_SIZE]{};
+	int _event = -1;
+};
+
 template <typename T>
 class my_unordered_set : public unordered_set<T>
 {
@@ -74,7 +83,7 @@ public:
 	}
 };
 
-enum COMP_TYPE { OP_ACCEPT, OP_RECV, OP_SEND, OP_NPC_MOVE, OP_AI_HELLO, OP_NPC_ATTACK };
+enum COMP_TYPE { OP_ACCEPT, OP_RECV, OP_SEND, OP_LOGIN_OK, OP_NPC_MOVE, OP_NPC_REVIVE, OP_NPC_ATTACK };
 class OVER_EXP {
 public:
 	WSAOVERLAPPED _over;

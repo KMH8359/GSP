@@ -1,6 +1,6 @@
 constexpr int PORT_NUM = 4000;
 constexpr int BUF_SIZE = 200;
-constexpr int NAME_SIZE = 20;
+constexpr int NAME_SIZE = 10;
 constexpr int CHAT_SIZE = 100;
 
 constexpr int MAX_USER = 10000;
@@ -25,11 +25,12 @@ struct TILEPOINT
 
 // Packet ID
 constexpr char CS_LOGIN = 0;
-constexpr char CS_MOVE = 1;
-constexpr char CS_CHAT = 2;
-constexpr char CS_ATTACK = 3;			// 4 방향 공격
-constexpr char CS_TELEPORT = 4;			// RANDOM한 위치로 Teleport, Stress Test할 때 Hot Spot현상을 피하기 위해 구현
-constexpr char CS_LOGOUT = 5;			// 클라이언트에서 정상적으로 접속을 종료하는 패킷
+constexpr char CS_SIGNUP = 1;
+constexpr char CS_MOVE = 2;
+constexpr char CS_CHAT = 3;
+constexpr char CS_ATTACK = 4;			// 4 방향 공격
+constexpr char CS_TELEPORT = 5;			// RANDOM한 위치로 Teleport, Stress Test할 때 Hot Spot현상을 피하기 위해 구현
+constexpr char CS_LOGOUT = 6;			// 클라이언트에서 정상적으로 접속을 종료하는 패킷
 
 constexpr char SC_LOGIN_INFO = 2;
 constexpr char SC_ADD_OBJECT = 3;
@@ -46,7 +47,8 @@ constexpr char SC_DEAD = 11;
 struct CS_LOGIN_PACKET {
 	unsigned char size;
 	char	type;
-	char	name[NAME_SIZE];
+	wchar_t	id[NAME_SIZE];
+	wchar_t	password[NAME_SIZE];
 };
 
 struct CS_MOVE_PACKET {
@@ -121,6 +123,9 @@ struct SC_CHAT_PACKET {
 struct SC_LOGIN_OK_PACKET {
 	unsigned char size;
 	char	type;
+	int		id;
+	short	HP;
+	int		EXP;
 };
 
 struct SC_LOGIN_FAIL_PACKET {
