@@ -106,10 +106,10 @@ void DB_Thread()
 
 								retcode = SQLExecute(hstmt);
 								if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
-									printf("SIGNUP OK \n");
+									cout << "SIGNUP OK \n";
 								}
 								else {
-									printf("SIGNUP FAILED \n");
+									cout << "SIGNUP FAILED \n";
 									HandleDiagnosticRecord(hdbc, SQL_HANDLE_DBC, retcode);
 								}
 							}
@@ -117,6 +117,7 @@ void DB_Thread()
 								printf("SQLPrepare failed \n");
 								HandleDiagnosticRecord(hdbc, SQL_HANDLE_DBC, retcode);
 							}
+							SQLFreeStmt(hstmt, SQL_CLOSE);
 							break;
 						case EV_SIGNIN:
 							retcode = SQLPrepare(hstmt, (SQLWCHAR*)L"{CALL sign_in(?, ?)}", SQL_NTS);
@@ -127,22 +128,30 @@ void DB_Thread()
 								retcode = SQLExecute(hstmt);
 								auto session = (SESSION*)characters[ev.session_id];
 								if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
-									SQLBindCol(hstmt, 3, SQL_C_LONG, &session->HP, 0, NULL);
-									SQLBindCol(hstmt, 4, SQL_C_LONG, &session->EXP, 0, NULL);
-									OVER_EXP* ov = new OVER_EXP;
-									ov->_comp_type = OP_LOGIN_OK;
-									PostQueuedCompletionStatus(h_iocp, 1, ev.session_id, &ov->_over);
+									retcode = SQLFetch(hstmt);
+									if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
+										cout << "LOGIN SUCCEED\n";
+										SQLBindCol(hstmt, 3, SQL_C_LONG, &session->HP, 0, NULL);
+										SQLBindCol(hstmt, 4, SQL_C_LONG, &session->EXP, 0, NULL);
+										OVER_EXP* ov = new OVER_EXP;
+										ov->_comp_type = OP_LOGIN_OK;
+										PostQueuedCompletionStatus(h_iocp, 1, ev.session_id, &ov->_over);
+									}
+									else {
+										cout << "LOGIN FAILED \n";
+										session->send_loginFail_packet();
+									}
 								}
 								else {
-									//session->send_loginFail_packet();
-									printf("LOGIN FAILED \n");
+									cout << "LOGIN FAILED \n";
 									HandleDiagnosticRecord(hdbc, SQL_HANDLE_DBC, retcode);
 								}
 							}
 							else {
-								printf("SQLPrepare failed \n");
+								cout << "SQLPrepare failed \n";
 								HandleDiagnosticRecord(hdbc, SQL_HANDLE_DBC, retcode);
 							}
+							SQLFreeStmt(hstmt,SQL_CLOSE);
 							break;
 						}
 					}
@@ -205,11 +214,11 @@ void WakeUpNPC(int npc_id, int waker)
 		cout << "ERROR" << endl;
 	}
 	auto NPC = (MONSTER*)characters[npc_id];
-	if (NPC->_is_active.load()) return;
+	NPC->target_id = waker;
+	if (NPC->_is_active.load() || NPC->m_type == LOCKED) return;
 	bool old_state = false;
 	if (false == atomic_compare_exchange_strong(&NPC->_is_active, &old_state, true))
 		return;
-	NPC->target_id = waker;
 	TIMER_EVENT ev{ npc_id, chrono::system_clock::now(), EV_RANDOM_MOVE, 0 };
 	timer_queue.push(ev);
 }
@@ -324,6 +333,7 @@ void process_packet(int c_id, char* packet)
 		session->_view_list.s_mutex.lock_shared();
 		unordered_set<int> near_list = session->_view_list;
 		session->_view_list.s_mutex.unlock_shared();
+		session->send_chat_packet(session->_id, p->mess);
 		for (auto& obj_id : near_list) {
 			if (is_npc(obj_id)) continue;
 			auto other_session = (SESSION*)characters[obj_id];
@@ -343,7 +353,8 @@ void process_packet(int c_id, char* packet)
 					bool alive = true;
 					if (false == atomic_compare_exchange_strong(&obj->is_alive, &alive, false))
 						return;
-					session->EXP += obj->EXP;	
+					session->EXP += obj->EXP;
+					cout << session->EXP << endl;
 					obj->_view_list.s_mutex.lock_shared();
 					for (auto& player_id : obj->_view_list) {
 						cout << "send remove packet\n";
@@ -620,13 +631,13 @@ void worker_thread(HANDLE h_iocp)
 				timer_queue.push(ev);
 				break;
 			}
-
-
 			auto NPC = (MONSTER*)characters[key];
 			if (can_attack(static_cast<int>(key), NPC->target_id)) {
 				characters[NPC->target_id]->HP.fetch_sub(50);
-				TIMER_EVENT ev{ static_cast<int>(key), chrono::system_clock::now() + 1s, EV_ATTACK, 0 };
-				timer_queue.push(ev);
+				TIMER_EVENT ev_attack{ static_cast<int>(key), chrono::system_clock::now() + 1s, EV_ATTACK, 0 };
+				timer_queue.push(ev_attack);
+				TIMER_EVENT ev_healPlayer{ NPC->target_id, chrono::system_clock::now() + 5s, EV_PLAYERHP_RECOVERY, 0 };
+				timer_queue.push(ev_healPlayer);
 			}
 			else {
 				TIMER_EVENT ev{ static_cast<int>(key), chrono::system_clock::now() + 1s, EV_RANDOM_MOVE, 0 };
@@ -634,6 +645,17 @@ void worker_thread(HANDLE h_iocp)
 			}
 		}
 						  break;
+		case OP_HEAL: {
+			delete ex_over;
+			auto session = (SESSION*)characters[key];
+			if (session->HP < session->MAX_HP) {
+				session->HP.fetch_add(session->MAX_HP / 10);
+				if (session->HP > session->MAX_HP)
+					session->HP = session->MAX_HP;
+				TIMER_EVENT ev{ static_cast<int>(key), chrono::system_clock::now() + 5s, EV_PLAYERHP_RECOVERY, 0 };
+			}
+		}
+					break;
 		}
 	}
 }
@@ -702,7 +724,8 @@ void InitializeNPC()
 		NPC->_state = ST_INGAME;
 		NPC->a_type = static_cast<ATTACK_TYPE>(rand() % 2);
 		NPC->m_type = static_cast<MOVE_TYPE>(rand() % 2);
-
+		NPC->Level = rand() % 9;
+		NPC->EXP = NPC->Level * NPC->Level * 2 * int(NPC->a_type + 1) * int(NPC->m_type + 1);
 		auto L = NPC->_L = luaL_newstate();
 		luaL_openlibs(L);
 		luaL_loadfile(L, "npc.lua");
@@ -747,13 +770,26 @@ void do_timer()
 				PostQueuedCompletionStatus(h_iocp, 1, ev.obj_id, &ov->_over);
 			}
 						  break;
+			case EV_CHASE_MOVE: {
+				OVER_EXP* ov = new OVER_EXP;
+				ov->_comp_type = OP_NPC_ATTACK;
+				PostQueuedCompletionStatus(h_iocp, 1, ev.obj_id, &ov->_over);
+			}
+							  break;
 			case EV_REVIVE: {
+				cout << ev.obj_id << "revived\n";
 				characters[ev.obj_id]->is_alive.store(true);
 				OVER_EXP* ov = new OVER_EXP;
 				ov->_comp_type = OP_NPC_MOVE;
 				PostQueuedCompletionStatus(h_iocp, 1, ev.obj_id, &ov->_over);
 			}
-							   break;
+						  break;
+			case EV_PLAYERHP_RECOVERY: {
+				OVER_EXP* ov = new OVER_EXP;
+				ov->_comp_type = OP_HEAL;
+				PostQueuedCompletionStatus(h_iocp, 1, ev.obj_id, &ov->_over);
+			}
+									 break;
 			}
 			continue;
 		}

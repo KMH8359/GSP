@@ -14,6 +14,7 @@ public:
 public:
 	MONSTER()
 	{
+
 	}
 
 	~MONSTER() {}

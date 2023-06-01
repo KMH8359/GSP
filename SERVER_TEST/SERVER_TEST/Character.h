@@ -10,7 +10,9 @@ public:
 	int _id;
 	TILEPOINT point;
 	atomic<short>	HP;
+	short	MAX_HP;
 	short	EXP;
+	short	Level;
 	char	_name[NAME_SIZE];
 	atomic_bool		is_alive;
 	int		last_move_time;
@@ -19,8 +21,9 @@ public:
 	CHARACTER()
 	{
 		_id = -1;
-		point.x = point.y = EXP = last_move_time = 0;
+		point.x = point.y = EXP = Level = last_move_time = 0;
 		HP = 200;
+		MAX_HP = 200;
 		_name[0] = 0;
 		_state = ST_FREE;
 		is_alive = true;
