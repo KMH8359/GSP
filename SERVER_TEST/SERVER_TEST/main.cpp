@@ -185,14 +185,24 @@ bool is_npc(int object_id)
 
 bool can_see(int from, int to)
 {
-	if (abs(characters[from]->point.x - characters[to]->point.x) > VIEW_RANGE || characters[to]->is_alive == false) return false;
-	return abs(characters[from]->point.y - characters[to]->point.y) <= VIEW_RANGE;
+	try {
+		if (abs(characters.at(from)->point.x - characters.at(to)->point.x) > VIEW_RANGE || characters.at(to)->is_alive == false) return false;
+		return abs(characters.at(from)->point.y - characters.at(to)->point.y) <= VIEW_RANGE;
+	}
+	catch (const out_of_range& e){
+		return false;
+	}
 }
 
 bool can_attack(int from, int to)
 {
-	if (abs(characters[from]->point.x - characters[to]->point.x) > ATTACK_RANGE) return false;
-	return abs(characters[from]->point.y - characters[to]->point.y) <= ATTACK_RANGE;
+	try {
+		if (abs(characters.at(from)->point.x - characters.at(to)->point.x) > ATTACK_RANGE) return false;
+		return abs(characters.at(from)->point.y - characters.at(to)->point.y) <= ATTACK_RANGE;
+	}
+	catch (const out_of_range& e) {
+		return false;
+	}
 }
 
 int get_new_client_id()
@@ -206,16 +216,12 @@ int get_new_client_id()
 
 void WakeUpNPC(int npc_id, int waker)
 {
-	//OVER_EXP* exover = new OVER_EXP;
-	//exover->_comp_type = OP_AI_HELLO;
-	//exover->_ai_target_obj = waker;
-	//PostQueuedCompletionStatus(h_iocp, 1, npc_id, &exover->_over);
 	if (is_pc(npc_id)) {
 		cout << "ERROR" << endl;
 	}
 	auto NPC = (MONSTER*)characters[npc_id];
-	NPC->target_id = waker;
-	if (NPC->_is_active.load() || NPC->m_type == LOCKED) return;
+
+	if (NPC->_is_active.load()) return;
 	bool old_state = false;
 	if (false == atomic_compare_exchange_strong(&NPC->_is_active, &old_state, true))
 		return;
@@ -226,30 +232,7 @@ void WakeUpNPC(int npc_id, int waker)
 void process_packet(int c_id, char* packet)
 {
 	auto session = (SESSION*)characters[c_id];
-	switch (packet[1]) {
-	//case CS_LOGIN: {
-	//	CS_LOGIN_PACKET* p = reinterpret_cast<CS_LOGIN_PACKET*>(packet);
-	//	strcpy_s(session->_name, p->name);
-	//	{
-	//		//lock_guard<mutex> ll{ session->_s_lock };
-	//		session->point.x = rand() % 100;
-	//		session->point.y = rand() % 100;
-	//		session->_state.store(ST_INGAME);
-	//	}
-	//	session->send_login_info_packet();
-	//	for (auto& pl : characters) {
-	//		if (ST_INGAME != pl->_state.load()) continue;
-	//		if (pl->_id == c_id) continue;
-	//		if (!can_see(c_id, pl->_id)) continue;
-	//		if (is_pc(pl->_id)) {
-	//			auto other_session = (SESSION*)pl;
-	//			other_session->send_add_player_packet(session);
-	//		}
-	//		else WakeUpNPC(pl->_id, c_id);
-	//		session->send_add_player_packet(characters[pl->_id]);
-	//	}
-	//	break;
-	//}
+	switch (packet[2]) {
 	case CS_LOGIN: {
 		CS_LOGIN_PACKET* p = reinterpret_cast<CS_LOGIN_PACKET*>(packet);
 		DB_EVENT ev;
@@ -285,7 +268,7 @@ void process_packet(int c_id, char* packet)
 			session->point.x = x;
 			session->point.y = y;
 		}
-
+		session->direction = p->direction;
 		unordered_set<int> near_list;
 		session->_view_list.s_mutex.lock_shared();
 		unordered_set<int> old_vlist = session->_view_list;
@@ -297,7 +280,7 @@ void process_packet(int c_id, char* packet)
 				near_list.insert(cl->_id);
 		}
 
-		session->send_move_packet(session, p->direction);
+		session->send_move_packet(session);
 
 		for (auto& pl : near_list) {
 			if (is_pc(pl)) {
@@ -305,7 +288,7 @@ void process_packet(int c_id, char* packet)
 				near_session->_view_list.s_mutex.lock_shared();
 				if (near_session->_view_list.count(c_id)) {
 					near_session->_view_list.s_mutex.unlock_shared();
-					near_session->send_move_packet(session, p->direction);
+					near_session->send_move_packet(session);
 				}
 				else {
 					near_session->_view_list.s_mutex.unlock_shared();
@@ -348,19 +331,26 @@ void process_packet(int c_id, char* packet)
 		for (auto& obj_id : near_list) {
 			auto& obj = characters[obj_id];
 			if (is_npc(obj_id) && can_attack(c_id, obj_id)) {
-				obj->HP.fetch_sub(50);
+				auto target_monster = (MONSTER*)obj;
+				target_monster->HP.fetch_sub(50);
+				cout << target_monster->a_type << " a_type," << target_monster->m_type << " m_type의 " << 
+					target_monster->_id << "몬스터가 " << session->_id << "플레이어에게 50 데미지를 입음\n";
+				target_monster->target_id = c_id;
 				if (obj->HP.load() <= 0) {
 					bool alive = true;
 					if (false == atomic_compare_exchange_strong(&obj->is_alive, &alive, false))
 						return;
+					cout << obj->_id << " 몬스터 부활 타이머 시작\n";
+					TIMER_EVENT ev{ obj->_id, chrono::system_clock::now() + 3s, EV_REVIVE, 0 };
+					timer_queue.push(ev);
 					session->EXP += obj->EXP;
-					cout << session->EXP << endl;
+					cout << session->_id << "플레이어가 " << obj->EXP << "경험치 획득\n";
 					obj->_view_list.s_mutex.lock_shared();
 					for (auto& player_id : obj->_view_list) {
-						cout << "send remove packet\n";
 						auto session = (SESSION*)characters[player_id];
 						session->send_remove_player_packet(obj_id);
 					}
+					obj->_view_list.clear();
 					obj->_view_list.s_mutex.unlock_shared();
 				}
 			}
@@ -388,24 +378,28 @@ void disconnect(int c_id)
 	session->_state.store(ST_FREE);
 }
 
-void do_npc_random_move(int npc_id)
+void npc_move(int npc_id)
 {
 	auto npc = (MONSTER*)characters[npc_id];
 	unordered_set<int> old_vl = npc->_view_list;
-
-
-	int x = npc->point.x;
-	int y = npc->point.y;
-	short direction = rand() % 4;
-	switch (direction) {
-	case 0: if (y < (W_HEIGHT - 1)) y++; break; 
-	case 1: if (x > 0) x--; break;
-	case 2: if (y > 0) y--; break;
-	case 3:if (x < (W_WIDTH - 1)) x++; break; 
+	
+	if (npc->target_id > -1) {
+		npc->point = Trace_Player(npc->point, characters[npc->target_id]->point);
 	}
-	if (GridMap[x][y]) {
-		npc->point.x = x;
-		npc->point.y = y;
+	else {
+		int x = npc->point.x;
+		int y = npc->point.y;
+		npc->direction = rand() % 4;
+		switch (npc->direction) {
+		case 0: if (y < (W_HEIGHT - 1)) y++; break;
+		case 1: if (x > 0) x--; break;
+		case 2: if (y > 0) y--; break;
+		case 3:if (x < (W_WIDTH - 1)) x++; break;
+		}
+		if (GridMap[x][y]) {
+			npc->point.x = x;
+			npc->point.y = y;
+		}
 	}
 
 
@@ -413,8 +407,9 @@ void do_npc_random_move(int npc_id)
 	for (int i = 0; i < MAX_USER; ++i) {
 		auto& obj = characters[i];
 		if (ST_INGAME != obj->_state.load()) continue;
-		if (true == can_see(npc->_id, obj->_id))
+		if (true == can_see(npc->_id, obj->_id)) {
 			new_vl.insert(obj->_id);
+		}
 	}
 
 	for (auto pl : new_vl) {
@@ -423,7 +418,7 @@ void do_npc_random_move(int npc_id)
 			session->send_add_player_packet(characters[npc->_id]);
 		}
 		else {
-			session->send_move_packet(characters[npc->_id], direction);
+			session->send_move_packet(characters[npc->_id]);
 		}
 	}
 
@@ -442,6 +437,43 @@ void do_npc_random_move(int npc_id)
 	}
 	npc->_view_list = new_vl;
 }
+
+void do_lockednpc_update(int npc_id)
+{
+	auto npc = (MONSTER*)characters[npc_id];
+	unordered_set<int> old_vl = npc->_view_list;
+
+	my_unordered_set<int> new_vl;
+	for (int i = 0; i < MAX_USER; ++i) {
+		auto& obj = characters[i];
+		if (ST_INGAME != obj->_state.load()) continue;
+		if (true == can_see(npc->_id, obj->_id))
+			new_vl.insert(obj->_id);
+	}
+
+	for (auto pl : new_vl) {
+		auto session = (SESSION*)characters[pl];
+		if (0 == old_vl.count(pl)) {
+			session->send_add_player_packet(characters[npc->_id]);
+		}
+	}
+
+	for (auto pl : old_vl) {
+		if (0 == new_vl.count(pl)) {
+			auto session = (SESSION*)characters[pl];
+			session->_view_list.s_mutex.lock_shared();
+			if (0 != session->_view_list.count(npc->_id)) {
+				session->_view_list.s_mutex.unlock_shared();
+				session->send_remove_player_packet(npc->_id);
+			}
+			else {
+				session->_view_list.s_mutex.unlock_shared();
+			}
+		}
+	}
+	npc->_view_list = new_vl;
+}
+
 
 unordered_map<TILEPOINT, shared_ptr<A_star_Node>, PointHash, PointEqual>::iterator getNode(unordered_map<TILEPOINT, shared_ptr<A_star_Node>, PointHash, PointEqual>& m_List)
 {
@@ -466,6 +498,7 @@ bool check_openList(TILEPOINT& _Pos, int _G, shared_ptr<A_star_Node> s_node, uno
 }
 TILEPOINT Trace_Player(TILEPOINT origin, TILEPOINT destination)
 {
+	if (origin == destination) return origin;
 	unordered_set<TILEPOINT, PointHash, PointEqual> closelist{};
 	unordered_map<TILEPOINT, shared_ptr<A_star_Node>, PointHash, PointEqual> openlist;
 	openlist.reserve(200);
@@ -596,15 +629,10 @@ void worker_thread(HANDLE h_iocp)
 		}
 		case OP_NPC_MOVE: {
 			delete ex_over;
-			if (characters[key]->is_alive.load() == false) {
-				cout << static_cast<int>(key) << " Revive Start\n";
-				TIMER_EVENT ev{ static_cast<int>(key), chrono::system_clock::now() + 30s, EV_REVIVE, 0 };
-				timer_queue.push(ev);
-				break;
-			}
-
-
 			bool keep_alive = false;
+			auto NPC = (MONSTER*)characters[static_cast<int>(key)];
+			if (!NPC->is_alive)
+				break;
 			for (int j = 0; j < MAX_USER; ++j) {
 				if (characters[j]->_state.load() != ST_INGAME) continue;
 				if (can_see(static_cast<int>(key), j)) {
@@ -613,38 +641,46 @@ void worker_thread(HANDLE h_iocp)
 				}
 			}
 			if (true == keep_alive) {
-				do_npc_random_move(static_cast<int>(key));
+				if (NPC->m_type == LOCKED) {
+					do_lockednpc_update(static_cast<int>(key));
+				}
+				else {
+					npc_move(static_cast<int>(key));
+				}
+				if (can_attack(static_cast<int>(key), NPC->target_id)) {
+					characters[NPC->target_id]->HP.fetch_sub(50);
+					cout << NPC->target_id << "플레이어가 " << NPC->_id << "몬스터에게 50 데미지를 입음\n";
+				}
 				TIMER_EVENT ev{ static_cast<int>(key), chrono::system_clock::now() + 1s, EV_RANDOM_MOVE, 0 };
 				timer_queue.push(ev);
 			}
 			else {
-				auto NPC = (MONSTER*)characters[static_cast<int>(key)];
 				NPC->_is_active = false;
 			}
 		}
 						break;
-		case OP_NPC_ATTACK: {
-			delete ex_over;
-			if (characters[key]->is_alive.load() == false) {
-				cout << static_cast<int>(key) << " Revive Start\n";
-				TIMER_EVENT ev{ static_cast<int>(key), chrono::system_clock::now() + 30s, EV_REVIVE, 0 };
-				timer_queue.push(ev);
-				break;
-			}
-			auto NPC = (MONSTER*)characters[key];
-			if (can_attack(static_cast<int>(key), NPC->target_id)) {
-				characters[NPC->target_id]->HP.fetch_sub(50);
-				TIMER_EVENT ev_attack{ static_cast<int>(key), chrono::system_clock::now() + 1s, EV_ATTACK, 0 };
-				timer_queue.push(ev_attack);
-				TIMER_EVENT ev_healPlayer{ NPC->target_id, chrono::system_clock::now() + 5s, EV_PLAYERHP_RECOVERY, 0 };
-				timer_queue.push(ev_healPlayer);
-			}
-			else {
-				TIMER_EVENT ev{ static_cast<int>(key), chrono::system_clock::now() + 1s, EV_RANDOM_MOVE, 0 };
-				timer_queue.push(ev);
-			}
-		}
-						  break;
+		//case OP_NPC_ATTACK: {
+		//	delete ex_over;
+		//	auto NPC = (MONSTER*)characters[key];
+		//	if (characters[NPC->target_id]->is_alive.load() == false) {
+		//		cout << static_cast<int>(key) << "Player Revive Start\n";
+		//		TIMER_EVENT ev{ static_cast<int>(key), chrono::system_clock::now() + 10s, EV_REVIVE, 0 };
+		//		timer_queue.push(ev);
+		//		break;
+		//	}
+		//	if (can_attack(static_cast<int>(key), NPC->target_id)) {
+		//		characters[NPC->target_id]->HP.fetch_sub(50);
+		//		TIMER_EVENT ev_attack{ static_cast<int>(key), chrono::system_clock::now() + 1s, EV_ATTACK, 0 };
+		//		timer_queue.push(ev_attack);
+		//		//TIMER_EVENT ev_healPlayer{ NPC->target_id, chrono::system_clock::now() + 5s, EV_PLAYERHP_RECOVERY, 0 };
+		//		//timer_queue.push(ev_healPlayer);
+		//	}
+		//	else {
+		//		TIMER_EVENT ev_move{ static_cast<int>(key), chrono::system_clock::now() + 1s, EV_RANDOM_MOVE, 0 };
+		//		timer_queue.push(ev_move);
+		//	}
+		//}
+		//				  break;
 		case OP_HEAL: {
 			delete ex_over;
 			auto session = (SESSION*)characters[key];
@@ -726,19 +762,19 @@ void InitializeNPC()
 		NPC->m_type = static_cast<MOVE_TYPE>(rand() % 2);
 		NPC->Level = rand() % 9;
 		NPC->EXP = NPC->Level * NPC->Level * 2 * int(NPC->a_type + 1) * int(NPC->m_type + 1);
-		auto L = NPC->_L = luaL_newstate();
-		luaL_openlibs(L);
-		luaL_loadfile(L, "npc.lua");
-		lua_pcall(L, 0, 0, 0);
+		//auto L = NPC->_L = luaL_newstate();
+		//luaL_openlibs(L);
+		//luaL_loadfile(L, "npc.lua");
+		//lua_pcall(L, 0, 0, 0);
 
-		lua_getglobal(L, "set_uid");
-		lua_pushnumber(L, i);
-		lua_pcall(L, 1, 0, 0);
-		// lua_pop(L, 1);// eliminate set_uid from stack after call
+		//lua_getglobal(L, "set_uid");
+		//lua_pushnumber(L, i);
+		//lua_pcall(L, 1, 0, 0);
+		//// lua_pop(L, 1);// eliminate set_uid from stack after call
 
-		lua_register(L, "API_SendMessage", API_SendMessage);
-		lua_register(L, "API_get_x", API_get_x);
-		lua_register(L, "API_get_y", API_get_y);
+		//lua_register(L, "API_SendMessage", API_SendMessage);
+		//lua_register(L, "API_get_x", API_get_x);
+		//lua_register(L, "API_get_y", API_get_y);
 		characters[i] = NPC;
 		characters[i]->_id = i;
 
@@ -772,16 +808,21 @@ void do_timer()
 						  break;
 			case EV_CHASE_MOVE: {
 				OVER_EXP* ov = new OVER_EXP;
-				ov->_comp_type = OP_NPC_ATTACK;
+				ov->_comp_type = OP_NPC_CHASE;
 				PostQueuedCompletionStatus(h_iocp, 1, ev.obj_id, &ov->_over);
 			}
 							  break;
 			case EV_REVIVE: {
-				cout << ev.obj_id << "revived\n";
-				characters[ev.obj_id]->is_alive.store(true);
-				OVER_EXP* ov = new OVER_EXP;
-				ov->_comp_type = OP_NPC_MOVE;
-				PostQueuedCompletionStatus(h_iocp, 1, ev.obj_id, &ov->_over);
+				if (!is_pc(ev.obj_id)) {
+					cout << ev.obj_id << " 몬스터가 부활함\n";
+					characters[ev.obj_id]->is_alive.store(true);
+					characters[ev.obj_id]->HP.store(characters[ev.obj_id]->MAX_HP);
+					auto Monster = (MONSTER*)characters[ev.obj_id];
+					OVER_EXP* ov = new OVER_EXP;
+					ov->_comp_type = OP_NPC_MOVE;
+					PostQueuedCompletionStatus(h_iocp, 1, ev.obj_id, &ov->_over);
+				
+				}
 			}
 						  break;
 			case EV_PLAYERHP_RECOVERY: {

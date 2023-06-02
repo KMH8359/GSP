@@ -35,6 +35,7 @@ using namespace concurrency;
 
 constexpr int VIEW_RANGE = 15;
 constexpr int ATTACK_RANGE = 1;
+constexpr int MONSTER_VIEW_RANGE = 11;
 
 constexpr int PORT_NUM = 4000;
 constexpr int BUF_SIZE = 200;
@@ -83,7 +84,7 @@ public:
 	}
 };
 
-enum COMP_TYPE { OP_ACCEPT, OP_RECV, OP_SEND, OP_LOGIN_OK, OP_NPC_MOVE, OP_NPC_REVIVE, OP_NPC_ATTACK, OP_HEAL };
+enum COMP_TYPE { OP_ACCEPT, OP_RECV, OP_SEND, OP_LOGIN_OK, OP_NPC_MOVE, OP_NPC_CHASE, OP_NPC_ATTACK,  OP_NPC_REVIVE, OP_HEAL };
 class OVER_EXP {
 public:
 	WSAOVERLAPPED _over;
@@ -108,7 +109,6 @@ public:
 	}
 };
 
-
 struct TILEPOINT
 {
 	short x;
@@ -119,6 +119,10 @@ struct TILEPOINT
 		result.x = this->x + other.x;
 		result.y = this->y + other.y;
 		return result;
+	}
+
+	bool operator==(const TILEPOINT& other) const {
+		return this->x == other.x && this->y == other.y;
 	}
 };
 

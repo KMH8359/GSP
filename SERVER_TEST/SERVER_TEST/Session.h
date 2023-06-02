@@ -41,7 +41,7 @@ public:
 		p.point.y = point.y;
 		do_send(&p);
 	}
-	void send_move_packet(CHARACTER* obj, char direction)
+	void send_move_packet(CHARACTER* obj)
 	{
 		//auto session = (SESSION*)characters[c_id];
 		SC_MOVE_OBJECT_PACKET p;
@@ -50,7 +50,7 @@ public:
 		p.type = SC_MOVE_OBJECT;
 		p.point.x = obj->point.x;
 		p.point.y = obj->point.y;
-		p.direction = direction;
+		p.direction = obj->direction;
 		p.move_time = obj->last_move_time;
 		do_send(&p);
 	}

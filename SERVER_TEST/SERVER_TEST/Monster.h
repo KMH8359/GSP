@@ -6,7 +6,7 @@ enum MOVE_TYPE{ LOCKED, ROAMING };	// LOCKED : 이동 못함
 class MONSTER : public CHARACTER {
 public:
 	atomic_bool	_is_active;
-	int target_id;
+	int target_id = -1;
 	lua_State* _L;
 	mutex	_ll;
 	ATTACK_TYPE a_type;

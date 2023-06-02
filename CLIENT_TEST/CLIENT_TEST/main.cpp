@@ -1,22 +1,5 @@
-﻿#define SFML_STATIC 1
-#define _CRT_SECURE_NO_WARNINGS
-#include <SFML/Graphics.hpp>
-#include <SFML/Network.hpp>
-#include <iostream>
-#include <unordered_map>
-#include <Windows.h>
-#include <locale>
-#include <codecvt>
-#include <chrono>
-#include <fstream>
-#include <array>
+﻿#include "stdafx.h"
 #include "protocol.h"
-
-using namespace std;
-
-#pragma comment (lib, "opengl32.lib")
-#pragma comment (lib, "winmm.lib")
-#pragma comment (lib, "ws2_32.lib")
 
 
 
@@ -154,6 +137,9 @@ OBJECT Level;
 OBJECT Login_UI;
 OBJECT Chat_Box;
 
+OBJECT LOGIN_BAR[2];
+
+
 sf::Texture* board;
 sf::Texture* pieces;
 sf::Texture* monsters;
@@ -180,7 +166,7 @@ void client_initialize()
 	hp_bar->loadFromFile("HP_ON.png");
 	login_ui->loadFromFile("loginUI.png");
 	logo_image->loadFromFile("logo.png");
-	chat_box->loadFromFile("chat_box.png");
+	chat_box->loadFromFile("Bar.png");
 	if (false == g_font.loadFromFile("cour.ttf")) {
 		cout << "Font Loading Error!\n";
 		exit(-1);
@@ -189,11 +175,16 @@ void client_initialize()
 	black_tile = OBJECT{ *board, 13, 8, TILE_WIDTH, TILE_WIDTH };
 
 	Level = OBJECT{ *lv, 0, 0, 100, 100 };
+
+	for (int i = 0; i < 2; ++i) {
+		LOGIN_BAR[i] = OBJECT{ *chat_box, 0, 0, 400, 100 };
+		LOGIN_BAR[i].a_move(250, 300 + i * 300);
+	}
 	Login_UI = OBJECT{ *login_ui, 0, 0, 300, 80 };
 	Login_UI.a_move(350, 800);
 
 	game_logo.setTexture(*logo_image);
-	game_logo.setPosition(0, 200);
+	game_logo.setPosition(0, 100);
 
 	Login_ID_Text.setFont(g_font);
 	Login_ID_Text.setCharacterSize(60);
@@ -244,7 +235,7 @@ void client_finish()
 void ProcessPacket(char* ptr)
 {
 	static bool first_time = true;
-	switch (ptr[1])
+	switch (ptr[2])
 	{
 	case SC_LOGIN_INFO:
 	{
@@ -390,9 +381,14 @@ void login_scene()
 			white_tile.a_draw();
 		}
 
+	
 	Login_ID_Text.setString(m_login_string[0]);
 	Login_PW_Text.setString(m_login_string[1]);
 
+	for (int i = 0; i < 2; ++i) {
+		//LOGIN_BAR[i].set_chat(m_login_string[i]);
+		LOGIN_BAR[i].a_draw();
+	}
 	g_window->draw(Login_ID_Text);
 	g_window->draw(Login_PW_Text);
 	g_window->draw(game_logo);
@@ -585,12 +581,6 @@ int main()
 					// 입력된 문자 처리 로직
 					m_mess[chat_length++] = inputChar;
 				}
-				//else if (event.key.code >= sf::Keyboard::Num0 && event.key.code <= sf::Keyboard::Num9)
-				//{
-				//	char inputChar = static_cast<char>('0' + (event.key.code - sf::Keyboard::Num0));
-				//	// 숫자 키 입력 처리 로직
-				//	m_mess[chat_length++] = inputChar;
-				//}
 				break;
 			}
 			if (event.type == sf::Event::KeyPressed) {

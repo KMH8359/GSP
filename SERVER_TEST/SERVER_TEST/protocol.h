@@ -1,7 +1,6 @@
 #pragma once
 #include "stdafx.h"
 
-
 // Packet ID
 constexpr char CS_LOGIN = 0;
 constexpr char CS_SIGNUP = 1;
@@ -24,42 +23,42 @@ constexpr char SC_DEAD = 11;
 
 #pragma pack (push, 1)
 struct CS_LOGIN_PACKET {
-	unsigned char size;
+	unsigned short size;
 	char	type;
 	wchar_t	id[NAME_SIZE];
 	wchar_t	password[NAME_SIZE];
 };
 
 struct CS_MOVE_PACKET {
-	unsigned char size;
+	unsigned short size;
 	char	type;
 	char	direction;  // 0 : UP, 1 : DOWN, 2 : LEFT, 3 : RIGHT
 	unsigned	move_time;
 };
 
 struct CS_CHAT_PACKET {
-	unsigned char size;
+	unsigned short size;			// 크기가 가변이다, mess가 작으면 size도 줄이자.
 	char	type;
 	char	mess[CHAT_SIZE];
 };
 
 struct CS_TELEPORT_PACKET {
-	unsigned char size;
+	unsigned short size;
 	char	type;
 };
 
 struct CS_ATTACK_PACKET {
-	unsigned char size;
+	unsigned short size;
 	char	type;
 };
 
 struct CS_LOGOUT_PACKET {
-	unsigned char size;
+	unsigned short size;
 	char	type;
 };
 
 struct SC_LOGIN_INFO_PACKET {
-	unsigned char size;
+	unsigned short size;
 	char	type;
 	int		id;
 	int		hp;
@@ -69,21 +68,8 @@ struct SC_LOGIN_INFO_PACKET {
 	TILEPOINT point;
 };
 
-struct SC_LOGIN_OK_PACKET {
-	unsigned char size;
-	char	type;
-	int		id;
-	short	HP;
-	int		EXP;
-};
-
-struct SC_LOGIN_FAIL_PACKET {
-	unsigned char size;
-	char	type;
-};
-
 struct SC_ADD_OBJECT_PACKET {
-	unsigned char size;
+	unsigned short size;
 	char	type;
 	int		id;
 	TILEPOINT point;
@@ -91,13 +77,13 @@ struct SC_ADD_OBJECT_PACKET {
 };
 
 struct SC_REMOVE_OBJECT_PACKET {
-	unsigned char size;
+	unsigned short size;
 	char	type;
 	int		id;
 };
 
 struct SC_MOVE_OBJECT_PACKET {
-	unsigned char size;
+	unsigned short size;
 	char	type;
 	int		id;
 	char	direction;
@@ -106,14 +92,28 @@ struct SC_MOVE_OBJECT_PACKET {
 };
 
 struct SC_CHAT_PACKET {
-	unsigned char size;
+	unsigned short size;
 	char	type;
 	int		id;
 	char	mess[CHAT_SIZE];
 };
 
-struct SC_STAT_CHANGEL_PACKET {
-	unsigned char size;
+struct SC_LOGIN_OK_PACKET {
+	unsigned short size;
+	char	type;
+	int		id;
+	short	HP;
+	int		EXP;
+};
+
+struct SC_LOGIN_FAIL_PACKET {
+	unsigned short size;
+	char	type;
+
+};
+
+struct SC_STAT_CHANGE_PACKET {
+	unsigned short size;
 	char	type;
 	int		hp;
 	int		max_hp;
@@ -123,13 +123,13 @@ struct SC_STAT_CHANGEL_PACKET {
 };
 
 struct SC_MONSTER_ATTACK_PACKET {
-	unsigned char size;
+	unsigned short size;
 	char	type;
 	short	damage;
 };
 
 struct SC_DEAD_PACKET {
-	unsigned char size;
+	unsigned short size;
 	char	type;
 	short	id;
 };
