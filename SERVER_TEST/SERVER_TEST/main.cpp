@@ -17,15 +17,11 @@ OVER_EXP g_a_over;
 TILEPOINT Trace_Player(TILEPOINT origin, TILEPOINT destination);
 
 
-TILEPOINT vec[8]{
+TILEPOINT vec[4]{
 	TILEPOINT(-1,0),
 	TILEPOINT(1,0),
 	TILEPOINT(0,1),
 	TILEPOINT(0,-1),
-	TILEPOINT(-1,-1),
-	TILEPOINT(-1,1),
-	TILEPOINT(1,-1),
-	TILEPOINT(1,1)
 };
 
 
@@ -197,7 +193,7 @@ bool can_see(int from, int to)
 bool can_attack(int from, int to)
 {
 	try {
-		if (abs(characters.at(from)->point.x - characters.at(to)->point.x) > ATTACK_RANGE) return false;
+		if (abs(characters.at(from)->point.x - characters.at(to)->point.x) > ATTACK_RANGE || characters.at(to)->is_alive == false) return false;
 		return abs(characters.at(from)->point.y - characters.at(to)->point.y) <= ATTACK_RANGE;
 	}
 	catch (const out_of_range& e) {
@@ -235,12 +231,27 @@ void process_packet(int c_id, char* packet)
 	switch (packet[2]) {
 	case CS_LOGIN: {
 		CS_LOGIN_PACKET* p = reinterpret_cast<CS_LOGIN_PACKET*>(packet);
-		DB_EVENT ev;
-		ev._event = EV_SIGNIN;
-		wcscpy_s(ev.user_id, sizeof(ev.user_id) / sizeof(wchar_t), p->id);
-		wcscpy_s(ev.user_password, sizeof(ev.user_password) / sizeof(wchar_t), p->password);
-		ev.session_id = c_id;
-		db_queue.push(ev);
+		session->point.x = rand() % W_WIDTH;
+		session->point.y = rand() % W_HEIGHT;
+		session->_state.store(ST_INGAME);
+		session->send_login_info_packet();
+		for (auto& pl : characters) {
+			if (ST_INGAME != pl->_state.load()) continue;
+			if (pl->_id == session->_id) continue;
+			if (!can_see(session->_id, pl->_id)) continue;
+			if (is_pc(pl->_id)) {
+				auto other_session = (SESSION*)pl;
+				other_session->send_add_player_packet(session);
+			}
+			else WakeUpNPC(pl->_id, session->_id);
+			session->send_add_player_packet(characters[pl->_id]);
+		}
+		//DB_EVENT ev;
+		//ev._event = EV_SIGNIN;
+		//wcscpy_s(ev.user_id, sizeof(ev.user_id) / sizeof(wchar_t), p->id);
+		//wcscpy_s(ev.user_password, sizeof(ev.user_password) / sizeof(wchar_t), p->password);
+		//ev.session_id = c_id;
+		//db_queue.push(ev);
 	}
 				 break;
 	case CS_SIGNUP: {
@@ -341,7 +352,7 @@ void process_packet(int c_id, char* packet)
 					if (false == atomic_compare_exchange_strong(&obj->is_alive, &alive, false))
 						return;
 					cout << obj->_id << " 몬스터 부활 타이머 시작\n";
-					TIMER_EVENT ev{ obj->_id, chrono::system_clock::now() + 3s, EV_REVIVE, 0 };
+					TIMER_EVENT ev{ obj->_id, chrono::system_clock::now() + 30s, EV_REVIVE, 0 };
 					timer_queue.push(ev);
 					session->EXP += obj->EXP;
 					cout << session->_id << "플레이어가 " << obj->EXP << "경험치 획득\n";
@@ -384,7 +395,20 @@ void npc_move(int npc_id)
 	unordered_set<int> old_vl = npc->_view_list;
 	
 	if (npc->target_id > -1) {
-		npc->point = Trace_Player(npc->point, characters[npc->target_id]->point);
+		TILEPOINT new_point = Trace_Player(npc->point, characters[npc->target_id]->point);
+		int dx = new_point.x - npc->point.x;
+		int dy = new_point.y - npc->point.y;
+
+		// 방향 계산
+		if (dx == 0 && dy == 1)
+			npc->direction = 0;  // 상
+		else if (dx == -1 && dy == 0)
+			npc->direction = 1;  // 좌
+		else if (dx == 0 && dy == -1)
+			npc->direction = 2;  // 하
+		else if (dx == 1 && dy == 0)
+			npc->direction = 3;  // 우
+		npc->point = new_point;
 	}
 	else {
 		int x = npc->point.x;
@@ -522,7 +546,7 @@ TILEPOINT Trace_Player(TILEPOINT origin, TILEPOINT destination)
 				S_Node = S_Node->parent;
 			}
 		}
-		for (int i = 0; i < 8; i++) {
+		for (int i = 0; i < 4; i++) {
 			TILEPOINT _Pos = S_Node->Pos + vec[i];
 			int _G = S_Node->G + abs(vec[i].x) + abs(vec[i].y);
 			if (closelist.count(_Pos) == 0 && GridMap[_Pos.x][_Pos.y] &&
@@ -641,18 +665,36 @@ void worker_thread(HANDLE h_iocp)
 				}
 			}
 			if (true == keep_alive) {
+				if (can_attack(NPC->target_id, static_cast<int>(key))) {
+					auto session = (SESSION*)characters[NPC->target_id];
+					session->_lock.lock();
+					session->HP -= 50;
+					if (session->HP <= 0) { // 사망처리
+						session->point.x = rand() % 2000;
+						session->point.y = rand() % 2000;
+						session->EXP /= 2;
+						session->HP = session->MAX_HP;
+						session->send_move_packet(session);
+						session->send_statchange_packet();
+					}
+					session->_lock.unlock();
+					cout << NPC->target_id << "플레이어가 " << NPC->_id << "몬스터에게 50 데미지를 입음\n";
+					session->send_statchange_packet();
+					bool isHealing = false;
+					if (atomic_compare_exchange_strong(&session->is_healing, &isHealing, true)) {
+						cout << session->_id << "플레이어 회복 시작\n";
+						TIMER_EVENT heal_ev{ session->_id, chrono::system_clock::now() + 5s, EV_PLAYERHP_RECOVERY, 0 };
+						timer_queue.push(heal_ev);
+					}
+				}
 				if (NPC->m_type == LOCKED) {
 					do_lockednpc_update(static_cast<int>(key));
 				}
 				else {
 					npc_move(static_cast<int>(key));
 				}
-				if (can_attack(static_cast<int>(key), NPC->target_id)) {
-					characters[NPC->target_id]->HP.fetch_sub(50);
-					cout << NPC->target_id << "플레이어가 " << NPC->_id << "몬스터에게 50 데미지를 입음\n";
-				}
-				TIMER_EVENT ev{ static_cast<int>(key), chrono::system_clock::now() + 1s, EV_RANDOM_MOVE, 0 };
-				timer_queue.push(ev);
+				TIMER_EVENT npc_ev{ static_cast<int>(key), chrono::system_clock::now() + 1s, EV_RANDOM_MOVE, 0 };
+				timer_queue.push(npc_ev);
 			}
 			else {
 				NPC->_is_active = false;
@@ -684,11 +726,20 @@ void worker_thread(HANDLE h_iocp)
 		case OP_HEAL: {
 			delete ex_over;
 			auto session = (SESSION*)characters[key];
-			if (session->HP < session->MAX_HP) {
+			cout << session->_id << "회복중 - " << session->HP.load() << " / " << session->MAX_HP << endl;
+			if (session->HP.load() < session->MAX_HP) {
 				session->HP.fetch_add(session->MAX_HP / 10);
-				if (session->HP > session->MAX_HP)
-					session->HP = session->MAX_HP;
-				TIMER_EVENT ev{ static_cast<int>(key), chrono::system_clock::now() + 5s, EV_PLAYERHP_RECOVERY, 0 };
+				if (session->HP.load() > session->MAX_HP) {
+					session->HP.store(session->MAX_HP);
+					session->is_healing.store(false);
+				}
+				cout << session->_id << "플레이어의 체력이 " << session->HP.load() << "만큼 회복됨\n";
+				session->send_statchange_packet();
+				TIMER_EVENT heal_ev{ static_cast<int>(key), chrono::system_clock::now() + 5s, EV_PLAYERHP_RECOVERY, 0 };
+				timer_queue.push(heal_ev);
+			}
+			else {
+				cout << session->_id << "플레이어 회복 종료\n";
 			}
 		}
 					break;
@@ -815,9 +866,10 @@ void do_timer()
 			case EV_REVIVE: {
 				if (!is_pc(ev.obj_id)) {
 					cout << ev.obj_id << " 몬스터가 부활함\n";
-					characters[ev.obj_id]->is_alive.store(true);
-					characters[ev.obj_id]->HP.store(characters[ev.obj_id]->MAX_HP);
 					auto Monster = (MONSTER*)characters[ev.obj_id];
+					Monster->is_alive.store(true);
+					Monster->HP.store(characters[ev.obj_id]->MAX_HP);
+					Monster->target_id = -1;
 					OVER_EXP* ov = new OVER_EXP;
 					ov->_comp_type = OP_NPC_MOVE;
 					PostQueuedCompletionStatus(h_iocp, 1, ev.obj_id, &ov->_over);

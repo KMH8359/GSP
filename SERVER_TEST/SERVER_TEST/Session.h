@@ -5,11 +5,15 @@
 class SESSION : public CHARACTER {
 	OVER_EXP _recv_over;
 public:
+	atomic_bool	is_healing;
 	SOCKET _socket;
 	int		_prev_remain;
+	shared_mutex _lock;
 public:
 	SESSION()
 	{
+		HP = MAX_HP = 1000;
+		is_healing = false;
 		_socket = 0;
 		_prev_remain = 0;
 	}
@@ -109,6 +113,17 @@ public:
 		do_send(&packet);
 	}
 
+	void send_statchange_packet()
+	{
+		SC_STAT_CHANGE_PACKET packet;
+		packet.size = sizeof(packet);
+		packet.type = SC_STAT_CHANGE;
+		packet.hp = HP;
+		packet.max_hp = MAX_HP;
+		packet.exp = EXP;
+		packet.level = Level;
+		do_send(&packet);
+	}
 
 	void send_remove_player_packet(int c_id)
 	{

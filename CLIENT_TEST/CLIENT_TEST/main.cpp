@@ -51,7 +51,8 @@ private:
 public:
 	int		id;
 	int		m_x, m_y;
-	short	HP = 200;
+	short	HP = 1000;
+	short	MAX_HP = 1000;
 	int		Exp = 0;
 	int		Level = 0;
 
@@ -134,11 +135,12 @@ OBJECT white_tile;
 OBJECT black_tile;
 OBJECT HPBAR[2];
 OBJECT Level;
-OBJECT Login_UI;
 OBJECT Chat_Box;
 
-OBJECT LOGIN_BAR[2];
-
+#pragma region LOGIN_SCENE
+OBJECT* LOGIN_BAR[2];
+OBJECT* Login_UI;
+#pragma endregion
 
 sf::Texture* board;
 sf::Texture* pieces;
@@ -150,6 +152,8 @@ sf::Texture* chat_box;
 
 void client_initialize()
 {
+	
+
 	board = new sf::Texture;
 	pieces = new sf::Texture;
 	monsters = new sf::Texture;
@@ -162,11 +166,11 @@ void client_initialize()
 	board->loadFromFile("tilemap.bmp");
 	pieces->loadFromFile("character.png");
 	monsters->loadFromFile("skeleton.png");
-	lv->loadFromFile("L.png");
+	lv->loadFromFile("Lv.png");
 	hp_bar->loadFromFile("HP_ON.png");
 	login_ui->loadFromFile("loginUI.png");
 	logo_image->loadFromFile("logo.png");
-	chat_box->loadFromFile("Bar.png");
+	chat_box->loadFromFile("chat_box.png");
 	if (false == g_font.loadFromFile("cour.ttf")) {
 		cout << "Font Loading Error!\n";
 		exit(-1);
@@ -176,12 +180,15 @@ void client_initialize()
 
 	Level = OBJECT{ *lv, 0, 0, 100, 100 };
 
+	Chat_Box = OBJECT{ *chat_box, 0, 0, 500, 350 };
+	Chat_Box.a_move(0, 650);
+
 	for (int i = 0; i < 2; ++i) {
-		LOGIN_BAR[i] = OBJECT{ *chat_box, 0, 0, 400, 100 };
-		LOGIN_BAR[i].a_move(250, 300 + i * 300);
+		LOGIN_BAR[i] = new OBJECT{ *chat_box, 0, 0, 400, 100 };
+		LOGIN_BAR[i]->a_move(250, 300 + i * 300);
 	}
-	Login_UI = OBJECT{ *login_ui, 0, 0, 300, 80 };
-	Login_UI.a_move(350, 800);
+	Login_UI = new OBJECT{ *login_ui, 0, 0, 300, 80 };
+	Login_UI->a_move(350, 800);
 
 	game_logo.setTexture(*logo_image);
 	game_logo.setPosition(0, 100);
@@ -206,8 +213,10 @@ void client_initialize()
 	Level_Text.setString(buf);
 
 
-	HPBAR[0] = OBJECT{ *hp_bar, 0, 0, 200, 50};
+	HPBAR[0] = OBJECT{ *hp_bar, 0, 0, avatar.HP, 50};
 	HPBAR[0].a_move(100, 0);
+	HPBAR[1] = OBJECT{ *hp_bar, 0, 0, -1 * (avatar.MAX_HP - avatar.HP), 50 };
+	HPBAR[1].a_move(100 + avatar.HP, 0);
 	char value;
 	ifstream file("map.txt");
 	if (file.is_open()) {
@@ -230,11 +239,14 @@ void client_finish()
 	delete pieces;
 	delete monsters;
 	delete hp_bar;
+	delete lv;
+	delete login_ui;
+	delete logo_image;
+	delete chat_box;
 }
 
 void ProcessPacket(char* ptr)
 {
-	static bool first_time = true;
 	switch (ptr[2])
 	{
 	case SC_LOGIN_INFO:
@@ -290,7 +302,6 @@ void ProcessPacket(char* ptr)
 			g_left_x = my_packet->point.x - SCREEN_WIDTH / 2;
 			g_top_y = my_packet->point.y - SCREEN_HEIGHT / 2;
 			avatar.a_resize(0, my_packet->direction * 50, 50, 50);
-			//HPBAR[0].a_resize(0, 0, avatar.HP, 50);
 		}
 		else {
 			players[other_id].move(my_packet->point.x, my_packet->point.y);
@@ -323,6 +334,18 @@ void ProcessPacket(char* ptr)
 			players[other_id].set_chat(my_packet->mess);
 		}
 
+		break;
+	}
+	case SC_STAT_CHANGE:
+	{
+		SC_STAT_CHANGE_PACKET* my_packet = reinterpret_cast<SC_STAT_CHANGE_PACKET*>(ptr);
+		avatar.HP = my_packet->hp;
+		avatar.Level = my_packet->level;
+		avatar.MAX_HP = my_packet->max_hp;
+		avatar.Exp = my_packet->exp;
+		HPBAR[0].a_resize(0, 0, avatar.HP, 50);
+		HPBAR[1].a_resize(0, 0, -1 * (avatar.MAX_HP - avatar.HP), 50);
+		HPBAR[1].a_move(100 + avatar.HP, 0);
 		break;
 	}
 	default:
@@ -386,13 +409,12 @@ void login_scene()
 	Login_PW_Text.setString(m_login_string[1]);
 
 	for (int i = 0; i < 2; ++i) {
-		//LOGIN_BAR[i].set_chat(m_login_string[i]);
-		LOGIN_BAR[i].a_draw();
+		LOGIN_BAR[i]->a_draw();
 	}
 	g_window->draw(Login_ID_Text);
 	g_window->draw(Login_PW_Text);
 	g_window->draw(game_logo);
-	Login_UI.a_draw();
+	Login_UI->a_draw();
 }
 
 void client_main()
@@ -429,10 +451,12 @@ void client_main()
 				black_tile.a_draw();
 			}
 		}
-	HPBAR[0].a_draw();
-	Level.a_draw();
 	avatar.draw();
 	for (auto& pl : players) pl.second.draw();
+	HPBAR[0].a_draw();
+	HPBAR[1].a_draw();
+	Level.a_draw();
+	Chat_Box.a_draw();
 	g_window->draw(Level_Text);
 }
 
@@ -557,6 +581,10 @@ int main()
 	//strcpy_s(p.name, player_name.c_str());
 	//send_packet(&p);
 	//avatar.set_name(p.name);
+
+	delete Login_UI;
+	for (int i = 0; i < 2; ++i)
+		delete LOGIN_BAR[i];
 
 	while (window.isOpen())
 	{

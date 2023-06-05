@@ -14,7 +14,7 @@ public:
 public:
 	MONSTER()
 	{
-
+		HP = MAX_HP = 200;
 	}
 
 	~MONSTER() {}
