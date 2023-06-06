@@ -61,12 +61,16 @@ struct TIMER_EVENT {
 	}
 };
 
-enum DB_EVENT_TYPE { EV_SIGNIN, EV_SIGNUP };
+enum DB_EVENT_TYPE { EV_SIGNIN, EV_SIGNUP, EV_SAVE };
 struct DB_EVENT {
 	unsigned short session_id = -1;
 	wchar_t user_id[NAME_SIZE]{};
 	wchar_t user_password[NAME_SIZE]{};
 	int _event = -1;
+	int Hp = -1;
+	int Max_Hp = -1;
+	int Lv = -1;
+	int Exp = -1;
 };
 
 template <typename T>

@@ -128,7 +128,7 @@ private:
 
 	sf::Text m_name;
 	sf::Text m_chat;
-	chrono::system_clock::time_point m_mess_end_time;
+	//chrono::system_clock::time_point m_mess_end_time;
 public:
 	sf::Sprite m_sprite;
 	int		id;
@@ -141,7 +141,7 @@ public:
 	short left = 0;
 	short top = 0;
 	short type = -1; // 몬스터 오브젝트의 타입
-
+	//chrono::system_clock::time_point m_lastFrameTime;
 	char name[NAME_SIZE];
 	OBJECT(sf::Texture& t, int x, int y, int x2, int y2) {
 		m_showing = false;
@@ -151,7 +151,7 @@ public:
 		left = x;
 		top = y;
 		set_name("NONAME");
-		m_mess_end_time = chrono::system_clock::now();
+		//m_lastFrameTime = chrono::system_clock::now();
 	}
 	OBJECT() {
 		m_showing = false;
@@ -191,13 +191,13 @@ public:
 		float ry = (m_y - g_top_y) * 50.f;
 		m_sprite.setPosition(rx, ry);
 		g_window->draw(m_sprite);
-		auto size = m_name.getGlobalBounds();
-		if (m_mess_end_time < chrono::system_clock::now()) {
-		}
-		else {
-			m_chat.setPosition(rx + 32 - size.width / 2, ry - 10);
-			g_window->draw(m_chat);
-		}
+		//auto size = m_name.getGlobalBounds();
+		//if (m_mess_end_time < chrono::system_clock::now()) {
+		//}
+		//else {
+		//	m_chat.setPosition(rx + 32 - size.width / 2, ry - 10);
+		//	g_window->draw(m_chat);
+		//}
 	}
 	void set_name(const char str[]) {
 		m_name.setFont(g_font);
@@ -212,7 +212,20 @@ public:
 		m_chat.setString(str);
 		m_chat.setFillColor(sf::Color(255, 255, 255));
 		m_chat.setStyle(sf::Text::Bold);
-		m_mess_end_time = chrono::system_clock::now() + chrono::seconds(3);
+		//m_mess_end_time = chrono::system_clock::now() + chrono::seconds(3);
+	}
+
+	void animate()
+	{
+		//auto now = chrono::system_clock::now();
+		//auto elapsed = now - m_lastFrameTime;
+		//if (elapsed >= chrono::seconds(1))
+		//{
+		auto rect = m_sprite.getTextureRect();
+		rect.left = (rect.left + 50) % 150 + left;
+		m_sprite.setTextureRect(rect);
+		//m_lastFrameTime = now;
+		//}
 	}
 };
 
@@ -314,7 +327,7 @@ void client_initialize()
 		file.close();
 	}
 
-	avatar = OBJECT{ *pieces, 0, 0, 50, 50 };
+	avatar = OBJECT{ *pieces, 0, 200, 50, 50 };
 }
 
 void client_finish()
@@ -341,15 +354,16 @@ void ProcessPacket(char* ptr)
 		avatar.id = g_myid;
 		avatar.HP = packet->hp;
 		avatar.MAX_HP = packet->max_hp;
+		cout << avatar.HP << "/" << avatar.MAX_HP << endl;
 		HPBAR[0].a_resize(0, 0, avatar.HP, 50);
 		HPBAR[1].a_resize(0, 0, -1 * (avatar.MAX_HP - avatar.HP), 50);
+		HPBAR[1].a_move(100 + avatar.HP, 0);
 		avatar.Exp = packet->exp;
 		avatar.Level = packet->level;
 		avatar.move(packet->point.x, packet->point.y);
 		g_left_x = packet->point.x - SCREEN_WIDTH / 2;
 		g_top_y = packet->point.y - SCREEN_HEIGHT / 2;
 		strcpy_s(avatar.name, sizeof(avatar.name), packet->name);
-		cout << avatar.name << endl;
 		char buf[8];
 		sprintf_s(buf, "%d", avatar.Level);
 		Level_Text.setString(buf);
@@ -398,13 +412,18 @@ void ProcessPacket(char* ptr)
 			avatar.move(my_packet->point.x, my_packet->point.y);
 			g_left_x = my_packet->point.x - SCREEN_WIDTH / 2;
 			g_top_y = my_packet->point.y - SCREEN_HEIGHT / 2;
-			avatar.a_resize(0, my_packet->direction * 50, 50, 50);
+			auto rect = avatar.m_sprite.getTextureRect();
+			rect.top = avatar.top + my_packet->direction * 50;
+			avatar.m_sprite.setTextureRect(rect);
+			avatar.animate();
+			//avatar.a_resize(0, my_packet->direction * 50, 50, 50);
 		}
 		else {
 			players[other_id].move(my_packet->point.x, my_packet->point.y);	
 			auto rect = players[other_id].m_sprite.getTextureRect();
 			rect.top = players[other_id].top + my_packet->direction * 50;
 			players[other_id].m_sprite.setTextureRect(rect);
+			players[other_id].animate();
 			//players[other_id].a_resize((players[other_id].type / 2) * 150,
 			//	((players[other_id].type % 2) * 200) + my_packet->direction * 50, 50, 50);
 		}
@@ -426,14 +445,11 @@ void ProcessPacket(char* ptr)
 	case SC_CHAT:
 	{
 		SC_CHAT_PACKET* my_packet = reinterpret_cast<SC_CHAT_PACKET*>(ptr);
-		char result[100]{};  // 결과를 저장할 배열 (충분한 크기로 선언)
-		if (my_packet->id == g_myid)
-			strcpy(result, avatar.name);  // name을 result에 복사
-		else 
-			strcpy(result, players[my_packet->id].name);  // name을 result에 복사
-		cout << my_packet->mess << endl;
-		strcat(result, " : ");  // " : " 문자열을 result에 덧붙임
-		strcat(result, my_packet->mess);  // my_packet->mess를 result에 덧붙임
+		char result[100]{};  
+		if (my_packet->id == g_myid) strcpy(result, avatar.name);  
+		else strcpy(result, players[my_packet->id].name);  
+		strcat(result, " : ");  
+		strcat(result, my_packet->mess);  
 		Chat_Box.add_chat(result);
 
 		break;
@@ -555,7 +571,9 @@ void client_main()
 			}
 		}
 	avatar.draw();
-	for (auto& pl : players) pl.second.draw();
+	for (auto& pl : players) {
+		pl.second.draw();
+	}
 	HPBAR[0].a_draw();
 	HPBAR[1].a_draw();
 	Level.a_draw();

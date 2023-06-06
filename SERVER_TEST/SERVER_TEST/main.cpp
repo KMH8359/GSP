@@ -76,6 +76,7 @@ void DB_Thread()
 			// Set login timeout to 5 seconds  
 			if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
 				SQLSetConnectAttr(hdbc, SQL_LOGIN_TIMEOUT, (SQLPOINTER)5, 0);
+				SQLSetConnectAttr(hdbc, SQL_ATTR_AUTOCOMMIT, (SQLPOINTER)SQL_AUTOCOMMIT_ON, SQL_IS_INTEGER);
 
 				SQLWCHAR* connectionString = (SQLWCHAR*)L"DRIVER=SQL Server;SERVER=14.36.243.161;DATABASE=SimpleMMORPG; UID=dbAdmin; PWD=2018180005;";
 
@@ -92,9 +93,13 @@ void DB_Thread()
 				{
 					DB_EVENT ev;
 					if (db_queue.try_pop(ev)) {
-						cout << "GET REQUEST\n";
+						wcout << "GET REQUEST\n";
 						SQLWCHAR* param1 = ev.user_id;
 						SQLWCHAR* param2 = ev.user_password;
+						SQLINTEGER param3 = ev.Hp;
+						SQLINTEGER param4 = ev.Max_Hp;
+						SQLINTEGER param5 = ev.Lv;
+						SQLINTEGER param6 = ev.Exp;
 						switch (ev._event) {
 						case EV_SIGNUP:
 							retcode = SQLPrepare(hstmt, (SQLWCHAR*)L"{CALL sign_up(?, ?)}", SQL_NTS);
@@ -104,10 +109,10 @@ void DB_Thread()
 
 								retcode = SQLExecute(hstmt);
 								if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
-									cout << "SIGNUP OK \n";
+									wcout << "SIGNUP OK \n";
 								}
 								else {
-									cout << "SIGNUP FAILED \n";
+									wcout << "SIGNUP FAILED \n";
 									HandleDiagnosticRecord(hdbc, SQL_HANDLE_DBC, retcode);
 								}
 							}
@@ -126,12 +131,12 @@ void DB_Thread()
 								retcode = SQLExecute(hstmt);
 								auto session = (SESSION*)characters[ev.session_id];
 								if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
-									cout << "LOGIN SUCCEED\n";
+									wcout << "LOGIN SUCCEED\n";
 									SQLBindCol(hstmt, 1, SQL_C_CHAR, session->_name, sizeof(session->_name), &OutSize);
-									SQLBindCol(hstmt, 3, SQL_C_LONG, &session->HP, sizeof(short), &OutSize);
-									SQLBindCol(hstmt, 4, SQL_C_LONG, &session->MAX_HP, sizeof(short), &OutSize);
-									SQLBindCol(hstmt, 5, SQL_C_LONG, &session->Level, sizeof(short), &OutSize);
-									SQLBindCol(hstmt, 6, SQL_C_LONG, &session->EXP, sizeof(short), &OutSize);
+									SQLBindCol(hstmt, 3, SQL_C_LONG, &session->HP, sizeof(int), &OutSize);
+									SQLBindCol(hstmt, 4, SQL_C_LONG, &session->MAX_HP, sizeof(int), &OutSize);
+									SQLBindCol(hstmt, 5, SQL_C_LONG, &session->Level, sizeof(int), &OutSize);
+									SQLBindCol(hstmt, 6, SQL_C_LONG, &session->EXP, sizeof(int), &OutSize);
 									retcode = SQLFetch(hstmt);
 									if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
 										OVER_EXP* ov = new OVER_EXP;
@@ -139,20 +144,50 @@ void DB_Thread()
 										PostQueuedCompletionStatus(h_iocp, 1, session->_id, &ov->_over);
 									}
 									else {
-										cout << "LOGIN FAILED \n";
+										wcout << "LOGIN FAILED \n";
 										session->send_loginFail_packet();
 									}
 								}
 								else {
-									cout << "LOGIN FAILED \n";
+									wcout << "LOGIN FAILED \n";
 									HandleDiagnosticRecord(hdbc, SQL_HANDLE_DBC, retcode);
 								}
 							}
 							else {
-								cout << "SQLPrepare failed \n";
+								wcout << "SQLPrepare failed \n";
 								HandleDiagnosticRecord(hdbc, SQL_HANDLE_DBC, retcode);
 							}
 							SQLFreeStmt(hstmt, SQL_CLOSE);
+							break;
+						case EV_SAVE:
+							retcode = SQLPrepare(hstmt, (SQLWCHAR*)L"{CALL Renewal(?, ?, ?, ?, ?)}", SQL_NTS);
+							if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
+								SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_WCHAR, SQL_WCHAR, 10, 0, (SQLPOINTER)param1, 0, NULL);
+								SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_LONG, SQL_INTEGER, 0, 0, (SQLPOINTER)&param3, 0, NULL);
+								SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_LONG, SQL_INTEGER, 0, 0, (SQLPOINTER)&param4, 0, NULL);
+								SQLBindParameter(hstmt, 4, SQL_PARAM_INPUT, SQL_C_LONG, SQL_INTEGER, 0, 0, (SQLPOINTER)&param5, 0, NULL);
+								SQLBindParameter(hstmt, 5, SQL_PARAM_INPUT, SQL_C_LONG, SQL_INTEGER, 0, 0, (SQLPOINTER)&param6, 0, NULL);
+								retcode = SQLExecute(hstmt);
+								if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
+									retcode = SQLEndTran(SQL_HANDLE_DBC, hdbc, SQL_COMMIT);
+									if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
+										std::cout << "Commit OK\n";
+									}
+									else {
+										std::cout << "Commit FAILED\n";
+										HandleDiagnosticRecord(hdbc, SQL_HANDLE_DBC, retcode);
+									}
+								}
+								else {
+									std::cout << "UPDATE FAILED \n";
+									HandleDiagnosticRecord(hdbc, SQL_HANDLE_DBC, retcode);
+								}
+							}
+							else {
+								wcout << "SQLPrepare failed \n";
+								HandleDiagnosticRecord(hdbc, SQL_HANDLE_DBC, retcode);
+							}
+							SQLFreeStmt(hstmt, SQL_UNBIND);
 							break;
 						}
 					}
@@ -218,7 +253,7 @@ int get_new_client_id()
 void WakeUpNPC(int npc_id, int waker)
 {
 	if (is_pc(npc_id)) {
-		cout << "ERROR" << endl;
+		std::cout << "ERROR" << endl;
 	}
 	auto NPC = (MONSTER*)characters[npc_id];
 
@@ -352,18 +387,26 @@ void process_packet(int c_id, char* packet)
 			if (is_npc(obj_id) && can_attack(c_id, obj_id)) {
 				auto target_monster = (MONSTER*)obj;
 				target_monster->HP.fetch_sub(50);
-				cout << target_monster->a_type << " a_type," << target_monster->m_type << " m_type의 " << 
+				std::cout << target_monster->a_type << " a_type," << target_monster->m_type << " m_type의 " <<
 					target_monster->_id << "몬스터가 " << session->_id << "플레이어에게 50 데미지를 입음\n";
 				if (target_monster->target_id < 0) target_monster->target_id = c_id;
 				if (obj->HP.load() <= 0) {
 					bool alive = true;
 					if (false == atomic_compare_exchange_strong(&obj->is_alive, &alive, false))
 						return;
-					cout << obj->_id << " 몬스터 부활 타이머 시작\n";
+					std::cout << obj->_id << " 몬스터 부활 타이머 시작\n";
 					TIMER_EVENT ev{ obj->_id, chrono::system_clock::now() + 30s, EV_REVIVE, 0 };
 					timer_queue.push(ev);
 					session->EXP += obj->EXP;
-					cout << session->_id << "플레이어가 " << obj->EXP << "경험치 획득\n";
+					std::cout << session->_id << "플레이어가 " << obj->EXP << "경험치 획득\n";
+					DB_EVENT update_event;
+					update_event._event = EV_SAVE;
+					//wcscpy_s(update_event.user_id, sizeof(update_event.user_id) / sizeof(wchar_t), p->id);
+					update_event.Hp = session->HP;
+					update_event.Max_Hp = session->MAX_HP;
+					update_event.Lv = session->Level;
+					update_event.Exp = session->EXP;
+					db_queue.push(update_event);
 					obj->_view_list.s_mutex.lock_shared();
 					for (auto& player_id : obj->_view_list) {
 						auto session = (SESSION*)characters[player_id];
@@ -576,9 +619,9 @@ void worker_thread(HANDLE h_iocp)
 		BOOL ret = GetQueuedCompletionStatus(h_iocp, &num_bytes, &key, &over, INFINITE);
 		OVER_EXP* ex_over = reinterpret_cast<OVER_EXP*>(over);
 		if (FALSE == ret) {
-			if (ex_over->_comp_type == OP_ACCEPT) { cout << "Accept Error\n"; exit(-1); }
+			if (ex_over->_comp_type == OP_ACCEPT) { std::cout << "Accept Error\n"; exit(-1); }
 			else {
-				cout << "GQCS Error on client[" << key << "]\n";
+				std::cout << "GQCS Error on client[" << key << "]\n";
 				disconnect(static_cast<int>(key));
 				if (ex_over->_comp_type == OP_SEND) delete ex_over;
 				continue;
@@ -608,7 +651,7 @@ void worker_thread(HANDLE h_iocp)
 				g_c_socket = WSASocket(AF_INET, SOCK_STREAM, 0, NULL, 0, WSA_FLAG_OVERLAPPED);
 			}
 			else {
-				cout << "Max user exceeded.\n";
+				std::cout << "Max user exceeded.\n";
 			}
 			ZeroMemory(&g_a_over._over, sizeof(g_a_over._over));
 			int addr_size = sizeof(SOCKADDR_IN);
@@ -725,11 +768,11 @@ void worker_thread(HANDLE h_iocp)
 							}
 					}
 					session->_lock.unlock();
-					cout << NPC->target_id << "플레이어가 " << NPC->_id << "몬스터에게 50 데미지를 입음\n";
+					std::cout << NPC->target_id << "플레이어가 " << NPC->_id << "몬스터에게 50 데미지를 입음\n";
 					session->send_statchange_packet();
 					bool isHealing = false;
 					if (atomic_compare_exchange_strong(&session->is_healing, &isHealing, true)) {
-						cout << session->_id << "플레이어 회복 시작\n";
+						std::cout << session->_id << "플레이어 회복 시작\n";
 						TIMER_EVENT heal_ev{ session->_id, chrono::system_clock::now() + 5s, EV_PLAYERHP_RECOVERY, 0 };
 						timer_queue.push(heal_ev);
 					}
@@ -752,7 +795,7 @@ void worker_thread(HANDLE h_iocp)
 		//	delete ex_over;
 		//	auto NPC = (MONSTER*)characters[key];
 		//	if (characters[NPC->target_id]->is_alive.load() == false) {
-		//		cout << static_cast<int>(key) << "Player Revive Start\n";
+		//		std::cout << static_cast<int>(key) << "Player Revive Start\n";
 		//		TIMER_EVENT ev{ static_cast<int>(key), chrono::system_clock::now() + 10s, EV_REVIVE, 0 };
 		//		timer_queue.push(ev);
 		//		break;
@@ -773,20 +816,20 @@ void worker_thread(HANDLE h_iocp)
 		case OP_HEAL: {
 			delete ex_over;
 			auto session = (SESSION*)characters[key];
-			cout << session->_id << "회복중 - " << session->HP.load() << " / " << session->MAX_HP << endl;
+			std::cout << session->_id << "회복중 - " << session->HP.load() << " / " << session->MAX_HP << endl;
 			if (session->HP.load() < session->MAX_HP) {
 				session->HP.fetch_add(session->MAX_HP / 10);
 				if (session->HP.load() > session->MAX_HP) {
 					session->HP.store(session->MAX_HP);
 					session->is_healing.store(false);
 				}
-				cout << session->_id << "플레이어의 체력이 " << session->HP.load() << "만큼 회복됨\n";
+				std::cout << session->_id << "플레이어의 체력이 " << session->HP.load() << "만큼 회복됨\n";
 				session->send_statchange_packet();
 				TIMER_EVENT heal_ev{ static_cast<int>(key), chrono::system_clock::now() + 5s, EV_PLAYERHP_RECOVERY, 0 };
 				timer_queue.push(heal_ev);
 			}
 			else {
-				cout << session->_id << "플레이어 회복 종료\n";
+				std::cout << session->_id << "플레이어 회복 종료\n";
 			}
 		}
 					break;
@@ -844,7 +887,7 @@ void InitializeMap()
 
 void InitializeNPC()
 {
-	cout << "NPC intialize begin.\n";
+	std::cout << "NPC intialize begin.\n";
 	for (int i = 0; i < MAX_USER; ++i) {
 		SESSION* PLAYER = new SESSION();
 		characters[i] = PLAYER;
@@ -878,7 +921,7 @@ void InitializeNPC()
 		characters[i]->_id = i;
 
 	}
-	cout << "NPC initialize end.\n";
+	std::cout << "NPC initialize end.\n";
 }
 
 void do_timer()
@@ -913,7 +956,7 @@ void do_timer()
 							  break;
 			case EV_REVIVE: {
 				if (!is_pc(ev.obj_id)) {
-					cout << ev.obj_id << " 몬스터가 부활함\n";
+					std::cout << ev.obj_id << " 몬스터가 부활함\n";
 					auto Monster = (MONSTER*)characters[ev.obj_id];
 					Monster->is_alive.store(true);
 					Monster->HP.store(characters[ev.obj_id]->MAX_HP);
