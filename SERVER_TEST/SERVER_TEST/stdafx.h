@@ -1,11 +1,13 @@
 #pragma once
-
+#define _CRT_SECURE_NO_WARNINGS
+#define _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING
 #include <iostream>
 #include <array>
 #include <WS2tcpip.h>
 #include <MSWSock.h>
 #include <thread>
 #include <vector>
+#include <codecvt>
 #include <mutex>
 #include <shared_mutex>
 #include <unordered_set>
@@ -176,4 +178,3 @@ public:
 		}
 	}
 };
-

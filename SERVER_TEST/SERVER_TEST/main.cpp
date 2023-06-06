@@ -27,6 +27,14 @@ TILEPOINT vec[4]{
 	TILEPOINT(0,-1),
 };
 
+void ConvertCharArrayToWideCharArray(const char* source, size_t sourceSize, wchar_t* destination, size_t destinationSize)
+{
+	std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
+	std::wstring wideString = converter.from_bytes(source, source + sourceSize);
+
+	wcsncpy(destination, wideString.c_str(), destinationSize - 1);
+	destination[destinationSize - 1] = L'\0';
+}
 
 void HandleDiagnosticRecord(SQLHANDLE hHandle, SQLSMALLINT hType, RETCODE RetCode) {
 	SQLSMALLINT iRec = 0;
@@ -100,6 +108,7 @@ void DB_Thread()
 						SQLINTEGER param4 = ev.Max_Hp;
 						SQLINTEGER param5 = ev.Lv;
 						SQLINTEGER param6 = ev.Exp;
+						wcout << param1 << endl;
 						switch (ev._event) {
 						case EV_SIGNUP:
 							retcode = SQLPrepare(hstmt, (SQLWCHAR*)L"{CALL sign_up(?, ?)}", SQL_NTS);
@@ -401,12 +410,15 @@ void process_packet(int c_id, char* packet)
 					std::cout << session->_id << "ÇÃ·¹ÀÌ¾î°¡ " << obj->EXP << "°æÇèÄ¡ È¹µæ\n";
 					DB_EVENT update_event;
 					update_event._event = EV_SAVE;
-					//wcscpy_s(update_event.user_id, sizeof(update_event.user_id) / sizeof(wchar_t), p->id);
+					wchar_t* wcharArray = new wchar_t[NAME_SIZE] {L""};
+					ConvertCharArrayToWideCharArray(session->_name, sizeof(session->_name), wcharArray, sizeof(wcharArray));
+					wcscpy_s(update_event.user_id, sizeof(update_event.user_id) / sizeof(update_event.user_id[0]), wcharArray);
 					update_event.Hp = session->HP;
 					update_event.Max_Hp = session->MAX_HP;
 					update_event.Lv = session->Level;
 					update_event.Exp = session->EXP;
 					db_queue.push(update_event);
+					delete[] wcharArray;
 					obj->_view_list.s_mutex.lock_shared();
 					for (auto& player_id : obj->_view_list) {
 						auto session = (SESSION*)characters[player_id];
