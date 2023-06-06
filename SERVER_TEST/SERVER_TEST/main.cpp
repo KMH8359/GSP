@@ -17,6 +17,9 @@ OVER_EXP g_a_over;
 TILEPOINT Trace_Player(TILEPOINT origin, TILEPOINT destination);
 
 
+#define USE_LOGINDB 1
+
+
 TILEPOINT vec[4]{
 	TILEPOINT(-1,0),
 	TILEPOINT(1,0),
@@ -54,7 +57,7 @@ void DB_Thread()
 	SQLHSTMT hstmt = 0;
 	SQLRETURN retcode;
 	//SQLWCHAR szUser_ID[IDPW_SIZE], szUser_PWD[IDPW_SIZE];
-	SQLINTEGER User_HP, User_EXP;
+	SQLLEN OutSize;
 
 	setlocale(LC_ALL, "korean");
 
@@ -85,7 +88,6 @@ void DB_Thread()
 				}
 				else
 					HandleDiagnosticRecord(hdbc, SQL_HANDLE_DBC, retcode);
-
 				while (1)
 				{
 					DB_EVENT ev;
@@ -124,14 +126,17 @@ void DB_Thread()
 								retcode = SQLExecute(hstmt);
 								auto session = (SESSION*)characters[ev.session_id];
 								if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
+									cout << "LOGIN SUCCEED\n";
+									SQLBindCol(hstmt, 1, SQL_C_CHAR, session->_name, sizeof(session->_name), &OutSize);
+									SQLBindCol(hstmt, 3, SQL_C_LONG, &session->HP, sizeof(short), &OutSize);
+									SQLBindCol(hstmt, 4, SQL_C_LONG, &session->MAX_HP, sizeof(short), &OutSize);
+									SQLBindCol(hstmt, 5, SQL_C_LONG, &session->Level, sizeof(short), &OutSize);
+									SQLBindCol(hstmt, 6, SQL_C_LONG, &session->EXP, sizeof(short), &OutSize);
 									retcode = SQLFetch(hstmt);
 									if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
-										cout << "LOGIN SUCCEED\n";
-										SQLBindCol(hstmt, 3, SQL_C_LONG, &session->HP, 0, NULL);
-										SQLBindCol(hstmt, 4, SQL_C_LONG, &session->EXP, 0, NULL);
 										OVER_EXP* ov = new OVER_EXP;
 										ov->_comp_type = OP_LOGIN_OK;
-										PostQueuedCompletionStatus(h_iocp, 1, ev.session_id, &ov->_over);
+										PostQueuedCompletionStatus(h_iocp, 1, session->_id, &ov->_over);
 									}
 									else {
 										cout << "LOGIN FAILED \n";
@@ -147,7 +152,7 @@ void DB_Thread()
 								cout << "SQLPrepare failed \n";
 								HandleDiagnosticRecord(hdbc, SQL_HANDLE_DBC, retcode);
 							}
-							SQLFreeStmt(hstmt,SQL_CLOSE);
+							SQLFreeStmt(hstmt, SQL_CLOSE);
 							break;
 						}
 					}
@@ -231,6 +236,14 @@ void process_packet(int c_id, char* packet)
 	switch (packet[2]) {
 	case CS_LOGIN: {
 		CS_LOGIN_PACKET* p = reinterpret_cast<CS_LOGIN_PACKET*>(packet);
+#ifdef USE_LOGINDB
+		DB_EVENT ev;
+		ev._event = EV_SIGNIN;
+		wcscpy_s(ev.user_id, sizeof(ev.user_id) / sizeof(wchar_t), p->id);
+		wcscpy_s(ev.user_password, sizeof(ev.user_password) / sizeof(wchar_t), p->password);
+		ev.session_id = c_id;
+		db_queue.push(ev);
+#else
 		session->point.x = rand() % W_WIDTH;
 		session->point.y = rand() % W_HEIGHT;
 		session->_state.store(ST_INGAME);
@@ -246,12 +259,7 @@ void process_packet(int c_id, char* packet)
 			else WakeUpNPC(pl->_id, session->_id);
 			session->send_add_player_packet(characters[pl->_id]);
 		}
-		//DB_EVENT ev;
-		//ev._event = EV_SIGNIN;
-		//wcscpy_s(ev.user_id, sizeof(ev.user_id) / sizeof(wchar_t), p->id);
-		//wcscpy_s(ev.user_password, sizeof(ev.user_password) / sizeof(wchar_t), p->password);
-		//ev.session_id = c_id;
-		//db_queue.push(ev);
+#endif
 	}
 				 break;
 	case CS_SIGNUP: {
@@ -272,7 +280,7 @@ void process_packet(int c_id, char* packet)
 		switch (p->direction) {
 		case 0: if (y < W_HEIGHT - 1) y++; break;
 		case 1: if (x > 0) x--; break;
-		case 2: if (y > 0) y--; break; 
+		case 2: if (y > 0) y--; break;
 		case 3: if (x < W_WIDTH - 1) x++; break;
 		}
 		if (GridMap[x][y]) {
@@ -346,7 +354,7 @@ void process_packet(int c_id, char* packet)
 				target_monster->HP.fetch_sub(50);
 				cout << target_monster->a_type << " a_type," << target_monster->m_type << " m_type의 " << 
 					target_monster->_id << "몬스터가 " << session->_id << "플레이어에게 50 데미지를 입음\n";
-				target_monster->target_id = c_id;
+				if (target_monster->target_id < 0) target_monster->target_id = c_id;
 				if (obj->HP.load() <= 0) {
 					bool alive = true;
 					if (false == atomic_compare_exchange_strong(&obj->is_alive, &alive, false))
@@ -670,12 +678,51 @@ void worker_thread(HANDLE h_iocp)
 					session->_lock.lock();
 					session->HP -= 50;
 					if (session->HP <= 0) { // 사망처리
-						session->point.x = rand() % 2000;
-						session->point.y = rand() % 2000;
+						session->point.x = 1000;
+						session->point.y = 1000;
 						session->EXP /= 2;
 						session->HP = session->MAX_HP;
-						session->send_move_packet(session);
 						session->send_statchange_packet();
+						unordered_set<int> near_list;
+						session->_view_list.s_mutex.lock_shared();
+						unordered_set<int> old_vlist = session->_view_list;
+						session->_view_list.s_mutex.unlock_shared();
+						for (auto& cl : characters) {
+							if (cl->_state.load() != ST_INGAME) continue;
+							if (cl->_id == session->_id) continue;
+							if (can_see(session->_id, cl->_id))
+								near_list.insert(cl->_id);
+						}
+
+						session->send_move_packet(session);
+
+						for (auto& pl : near_list) {
+							if (is_pc(pl)) {
+								auto near_session = (SESSION*)characters[pl];
+								near_session->_view_list.s_mutex.lock_shared();
+								if (near_session->_view_list.count(session->_id)) {
+									near_session->_view_list.s_mutex.unlock_shared();
+									near_session->send_move_packet(session);
+								}
+								else {
+									near_session->_view_list.s_mutex.unlock_shared();
+									near_session->send_add_player_packet(session);
+								}
+							}
+							else WakeUpNPC(pl, session->_id);
+
+							if (old_vlist.count(pl) == 0)
+								session->send_add_player_packet(characters[pl]);
+						}
+
+						for (auto& pl : old_vlist)
+							if (0 == near_list.count(pl)) {
+								session->send_remove_player_packet(pl);
+								if (is_pc(pl)) {
+									auto other_session = (SESSION*)characters[pl];
+									other_session->send_remove_player_packet(session->_id);
+								}
+							}
 					}
 					session->_lock.unlock();
 					cout << NPC->target_id << "플레이어가 " << NPC->_id << "몬스터에게 50 데미지를 입음\n";
@@ -809,9 +856,10 @@ void InitializeNPC()
 		NPC->point.y = rand() % W_HEIGHT;
 		sprintf_s(NPC->_name, "NPC%d", i);
 		NPC->_state = ST_INGAME;
-		NPC->a_type = static_cast<ATTACK_TYPE>(rand() % 2);
-		NPC->m_type = static_cast<MOVE_TYPE>(rand() % 2);
+		NPC->a_type = static_cast<ATTACK_TYPE>((i % 4) / 2);//(rand() % 2);
+		NPC->m_type = static_cast<MOVE_TYPE>((i % 4) % 2);//(rand() % 2);
 		NPC->Level = rand() % 9;
+		NPC->HP = NPC->Level * 100;
 		NPC->EXP = NPC->Level * NPC->Level * 2 * int(NPC->a_type + 1) * int(NPC->m_type + 1);
 		//auto L = NPC->_L = luaL_newstate();
 		//luaL_openlibs(L);

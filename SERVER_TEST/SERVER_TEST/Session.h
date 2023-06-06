@@ -12,7 +12,6 @@ public:
 public:
 	SESSION()
 	{
-		HP = MAX_HP = 1000;
 		is_healing = false;
 		_socket = 0;
 		_prev_remain = 0;
@@ -43,6 +42,11 @@ public:
 		p.type = SC_LOGIN_INFO;
 		p.point.x = point.x;
 		p.point.y = point.y;
+		p.exp = EXP;
+		p.level = Level;
+		p.hp = HP;
+		p.max_hp = MAX_HP;
+		strcpy_s(p.name, sizeof(p.name), _name);
 		do_send(&p);
 	}
 	void send_move_packet(CHARACTER* obj)

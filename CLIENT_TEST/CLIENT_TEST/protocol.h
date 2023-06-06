@@ -88,6 +88,7 @@ struct SC_LOGIN_INFO_PACKET {
 	int		exp;
 	int		level;
 	TILEPOINT point;
+	char	name[NAME_SIZE];
 };
 
 struct SC_ADD_OBJECT_PACKET {

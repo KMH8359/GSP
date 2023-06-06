@@ -40,21 +40,107 @@ void ConvertCharArrayToWideCharArray(const char* source, size_t sourceSize, wcha
 	destination[destinationSize - 1] = L'\0'; 
 }
 
+class CHATBOX {
+private:
+	sf::Sprite m_sprite;
+	vector<sf::Text> m_chats;
+	int m_maxChatCount; 
+public:
+	bool m_showing;
+	CHATBOX(sf::Texture& t, int x, int y, int x2, int y2) {
+		m_showing = false;
+		m_sprite.setTexture(t);
+		m_sprite.setTextureRect(sf::IntRect(x, y, x2, y2));
+		m_maxChatCount = 10;
+	}
+	CHATBOX() {
+		m_showing = false;
+		m_maxChatCount = 10;
+	}
+	void show()
+	{
+		m_showing = true;
+	}
+	void hide()
+	{
+		m_showing = false;
+	}
+
+	void a_move(int x, int y) {
+		m_sprite.setPosition((float)x, (float)y);
+		refreshChatPositions();
+	}
+
+	void a_draw() {
+		g_window->draw(m_sprite);
+	}
+
+	void t_draw() {
+		for (const auto& text : m_chats)
+			g_window->draw(text);
+	}
+
+	void draw() {
+		if (false == m_showing) return;
+		a_draw();
+		t_draw();		
+		//float rx = (m_x - g_left_x) * 50.f;
+		//float ry = (m_y - g_top_y) * 50.f;
+		//m_sprite.setPosition(rx, ry);
+		//g_window->draw(m_sprite);
+		//auto size = m_name.getGlobalBounds();
+		//if (m_mess_end_time < chrono::system_clock::now()) {
+		//}
+		//else {
+		//	m_chat.setPosition(rx + 32 - size.width / 2, ry - 10);
+		//	g_window->draw(m_chat);
+		//}
+	}
+
+	void add_chat(const char str[]) {
+		sf::Text m_chat;
+		m_chat.setFont(g_font);
+		m_chat.setString(str);
+		m_chat.setFillColor(sf::Color(255, 255, 255));
+		m_chat.setStyle(sf::Text::Bold);
+		m_chat.setCharacterSize(35);
+
+		m_chats.push_back(m_chat);
+
+		if (m_chats.size() > m_maxChatCount) 
+			m_chats.erase(m_chats.begin());
+		refreshChatPositions();
+	}
+
+	void refreshChatPositions() {
+		int x = m_sprite.getPosition().x;
+		int y = m_sprite.getPosition().y;
+
+		for (std::size_t i = 0; i < m_chats.size(); ++i) {
+			m_chats[i].setPosition(x, y + 50 * i);
+		}
+	}
+};
+
 class OBJECT {
 private:
 	bool m_showing;
-	sf::Sprite m_sprite;
 
 	sf::Text m_name;
 	sf::Text m_chat;
 	chrono::system_clock::time_point m_mess_end_time;
 public:
+	sf::Sprite m_sprite;
 	int		id;
 	int		m_x, m_y;
-	short	HP = 1000;
-	short	MAX_HP = 1000;
+	short	HP = 0;
+	short	MAX_HP = 0;
 	int		Exp = 0;
 	int		Level = 0;
+
+	short left = 0;
+	short top = 0;
+	short type = -1; // 몬스터 오브젝트의 타입
 
 	char name[NAME_SIZE];
 	OBJECT(sf::Texture& t, int x, int y, int x2, int y2) {
@@ -62,6 +148,8 @@ public:
 		m_sprite.setTexture(t);
 		m_sprite.setTextureRect(sf::IntRect(x, y, x2, y2));
 
+		left = x;
+		top = y;
 		set_name("NONAME");
 		m_mess_end_time = chrono::system_clock::now();
 	}
@@ -135,7 +223,7 @@ OBJECT white_tile;
 OBJECT black_tile;
 OBJECT HPBAR[2];
 OBJECT Level;
-OBJECT Chat_Box;
+CHATBOX Chat_Box;
 
 #pragma region LOGIN_SCENE
 OBJECT* LOGIN_BAR[2];
@@ -180,7 +268,7 @@ void client_initialize()
 
 	Level = OBJECT{ *lv, 0, 0, 100, 100 };
 
-	Chat_Box = OBJECT{ *chat_box, 0, 0, 500, 350 };
+	Chat_Box = CHATBOX{ *chat_box, 0, 0, 500, 350 };
 	Chat_Box.a_move(0, 650);
 
 	for (int i = 0; i < 2; ++i) {
@@ -208,9 +296,6 @@ void client_initialize()
 	Level_Text.setCharacterSize(60);
 	Level_Text.setFillColor(sf::Color(255, 0, 0));
 	Level_Text.setPosition(30, 5);
-	char buf[100];
-	sprintf_s(buf, "%d", avatar.Level);
-	Level_Text.setString(buf);
 
 
 	HPBAR[0] = OBJECT{ *hp_bar, 0, 0, avatar.HP, 50};
@@ -254,9 +339,20 @@ void ProcessPacket(char* ptr)
 		SC_LOGIN_INFO_PACKET* packet = reinterpret_cast<SC_LOGIN_INFO_PACKET*>(ptr);
 		g_myid = packet->id;
 		avatar.id = g_myid;
+		avatar.HP = packet->hp;
+		avatar.MAX_HP = packet->max_hp;
+		HPBAR[0].a_resize(0, 0, avatar.HP, 50);
+		HPBAR[1].a_resize(0, 0, -1 * (avatar.MAX_HP - avatar.HP), 50);
+		avatar.Exp = packet->exp;
+		avatar.Level = packet->level;
 		avatar.move(packet->point.x, packet->point.y);
 		g_left_x = packet->point.x - SCREEN_WIDTH / 2;
 		g_top_y = packet->point.y - SCREEN_HEIGHT / 2;
+		strcpy_s(avatar.name, sizeof(avatar.name), packet->name);
+		cout << avatar.name << endl;
+		char buf[8];
+		sprintf_s(buf, "%d", avatar.Level);
+		Level_Text.setString(buf);
 		avatar.show();
 		login_state = 3;
 	}
@@ -278,17 +374,18 @@ void ProcessPacket(char* ptr)
 		}
 		else if (id < MAX_USER) {
 			players[id] = OBJECT{ *pieces, 0, 0, 50, 50 };
-			
 			players[id].id = id;
+			strcpy_s(players[id].name, sizeof(players[id].name), my_packet->name);
 			players[id].move(my_packet->point.x, my_packet->point.y);
 			players[id].set_name(my_packet->name);
 			players[id].show();
 		}
-		else {
-			players[id] = OBJECT{ *monsters, 0, 200, 50, 50 };
+		else { // id % 4로 몬스터 타입이 결정됨
+			players[id].type = id % 4;
+			players[id] = OBJECT{ *monsters, (players[id].type / 2) * 150,  (players[id].type % 2) * 200, 50, 50 };
 			players[id].id = id;
 			players[id].move(my_packet->point.x, my_packet->point.y);
-			players[id].set_name(my_packet->name);
+			//players[id].set_name(my_packet->name);
 			players[id].show();
 		}
 		break;
@@ -304,8 +401,12 @@ void ProcessPacket(char* ptr)
 			avatar.a_resize(0, my_packet->direction * 50, 50, 50);
 		}
 		else {
-			players[other_id].move(my_packet->point.x, my_packet->point.y);
-			players[other_id].a_resize(0, my_packet->direction * 50, 50, 50);
+			players[other_id].move(my_packet->point.x, my_packet->point.y);	
+			auto rect = players[other_id].m_sprite.getTextureRect();
+			rect.top = players[other_id].top + my_packet->direction * 50;
+			players[other_id].m_sprite.setTextureRect(rect);
+			//players[other_id].a_resize((players[other_id].type / 2) * 150,
+			//	((players[other_id].type % 2) * 200) + my_packet->direction * 50, 50, 50);
 		}
 		break;
 	}
@@ -325,14 +426,15 @@ void ProcessPacket(char* ptr)
 	case SC_CHAT:
 	{
 		SC_CHAT_PACKET* my_packet = reinterpret_cast<SC_CHAT_PACKET*>(ptr);
-		int other_id = my_packet->id;
-		if (other_id == g_myid) {
-			cout << my_packet->mess << endl;
-			avatar.set_chat(my_packet->mess);
-		}
-		else {
-			players[other_id].set_chat(my_packet->mess);
-		}
+		char result[100]{};  // 결과를 저장할 배열 (충분한 크기로 선언)
+		if (my_packet->id == g_myid)
+			strcpy(result, avatar.name);  // name을 result에 복사
+		else 
+			strcpy(result, players[my_packet->id].name);  // name을 result에 복사
+		cout << my_packet->mess << endl;
+		strcat(result, " : ");  // " : " 문자열을 result에 덧붙임
+		strcat(result, my_packet->mess);  // my_packet->mess를 result에 덧붙임
+		Chat_Box.add_chat(result);
 
 		break;
 	}
@@ -345,6 +447,7 @@ void ProcessPacket(char* ptr)
 		avatar.Exp = my_packet->exp;
 		HPBAR[0].a_resize(0, 0, avatar.HP, 50);
 		HPBAR[1].a_resize(0, 0, -1 * (avatar.MAX_HP - avatar.HP), 50);
+		cout << avatar.HP << " / " << avatar.MAX_HP << endl;
 		HPBAR[1].a_move(100 + avatar.HP, 0);
 		break;
 	}
@@ -456,7 +559,7 @@ void client_main()
 	HPBAR[0].a_draw();
 	HPBAR[1].a_draw();
 	Level.a_draw();
-	Chat_Box.a_draw();
+	Chat_Box.draw();
 	g_window->draw(Level_Text);
 }
 
@@ -637,7 +740,14 @@ int main()
 						chat_length = 0;
 						memset(m_mess, 0, CHAT_SIZE);
 					}
-					else on_chat = true;
+					else {
+						on_chat = true;
+					}
+					break;
+				case sf::Keyboard::Comma: {
+					if (Chat_Box.m_showing) Chat_Box.hide();
+					else Chat_Box.show();
+				}
 					break;
 				case sf::Keyboard::Backspace:
 					if (chat_length && on_chat) {
