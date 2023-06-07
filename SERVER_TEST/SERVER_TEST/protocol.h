@@ -72,6 +72,7 @@ struct SC_LOGIN_INFO_PACKET {
 struct SC_ADD_OBJECT_PACKET {
 	unsigned short size;
 	char	type;
+	char	monster_type;
 	int		id;
 	TILEPOINT point;
 	char	name[NAME_SIZE];

@@ -395,7 +395,7 @@ void ProcessPacket(char* ptr)
 			players[id].show();
 		}
 		else { // id % 4로 몬스터 타입이 결정됨
-			players[id].type = id % 4;
+			players[id].type = (int)my_packet->monster_type % 4;
 			players[id] = OBJECT{ *monsters, (players[id].type / 2) * 150,  (players[id].type % 2) * 200, 50, 50 };
 			players[id].id = id;
 			players[id].move(my_packet->point.x, my_packet->point.y);
@@ -409,6 +409,7 @@ void ProcessPacket(char* ptr)
 		SC_MOVE_OBJECT_PACKET* my_packet = reinterpret_cast<SC_MOVE_OBJECT_PACKET*>(ptr);
 		int other_id = my_packet->id;
 		if (other_id == g_myid) {
+			cout << my_packet->point.x << ", " << my_packet->point.y << endl;
 			avatar.move(my_packet->point.x, my_packet->point.y);
 			g_left_x = my_packet->point.x - SCREEN_WIDTH / 2;
 			g_top_y = my_packet->point.y - SCREEN_HEIGHT / 2;

@@ -108,7 +108,6 @@ void DB_Thread()
 						SQLINTEGER param4 = ev.Max_Hp;
 						SQLINTEGER param5 = ev.Lv;
 						SQLINTEGER param6 = ev.Exp;
-						wcout << param1 << endl;
 						switch (ev._event) {
 						case EV_SIGNUP:
 							retcode = SQLPrepare(hstmt, (SQLWCHAR*)L"{CALL sign_up(?, ?)}", SQL_NTS);
@@ -180,10 +179,10 @@ void DB_Thread()
 								if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
 									retcode = SQLEndTran(SQL_HANDLE_DBC, hdbc, SQL_COMMIT);
 									if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
-										std::cout << "Commit OK\n";
+										std::cout << "COMMIT OK\n";
 									}
 									else {
-										std::cout << "Commit FAILED\n";
+										std::cout << "COMMIT FAILED\n";
 										HandleDiagnosticRecord(hdbc, SQL_HANDLE_DBC, retcode);
 									}
 								}
@@ -235,6 +234,17 @@ bool can_see(int from, int to)
 		return abs(characters.at(from)->point.y - characters.at(to)->point.y) <= VIEW_RANGE;
 	}
 	catch (const out_of_range& e){
+		return false;
+	}
+}
+
+bool in_monsterAgro(int from, int to)
+{
+	try {
+		if (abs(characters.at(from)->point.x - characters.at(to)->point.x) > MONSTER_VIEW_RANGE || characters.at(to)->is_alive == false) return false;
+		return abs(characters.at(from)->point.y - characters.at(to)->point.y) <= MONSTER_VIEW_RANGE;
+	}
+	catch (const out_of_range& e) {
 		return false;
 	}
 }
@@ -339,8 +349,9 @@ void process_packet(int c_id, char* packet)
 		for (auto& cl : characters) {
 			if (cl->_state.load() != ST_INGAME) continue;
 			if (cl->_id == c_id) continue;
-			if (can_see(c_id, cl->_id))
+			if (can_see(c_id, cl->_id)) {
 				near_list.insert(cl->_id);
+			}
 		}
 
 		session->send_move_packet(session);
@@ -458,6 +469,7 @@ void npc_move(int npc_id)
 	unordered_set<int> old_vl = npc->_view_list;
 	
 	if (npc->target_id > -1) {
+		if (!can_see(npc_id, npc->target_id)) return;
 		TILEPOINT new_point = Trace_Player(npc->point, characters[npc->target_id]->point);
 		int dx = new_point.x - npc->point.x;
 		int dy = new_point.y - npc->point.y;
@@ -496,6 +508,10 @@ void npc_move(int npc_id)
 		if (ST_INGAME != obj->_state.load()) continue;
 		if (true == can_see(npc->_id, obj->_id)) {
 			new_vl.insert(obj->_id);
+			if (npc->a_type == AGRO && npc->target_id < 0 && in_monsterAgro(npc->_id, obj->_id)) {
+				cout << npc->a_type << ", " << npc->m_type << "타입 몬스터 " << npc->_id << "가 " << obj->_id << "플레이어 추격 시작\n";
+				npc->target_id = obj->_id;
+			}
 		}
 	}
 
@@ -728,7 +744,7 @@ void worker_thread(HANDLE h_iocp)
 				}
 			}
 			if (true == keep_alive) {
-				if (can_attack(NPC->target_id, static_cast<int>(key))) {
+				if (can_attack(static_cast<int>(key), NPC->target_id)) {
 					auto session = (SESSION*)characters[NPC->target_id];
 					session->_lock.lock();
 					session->HP -= 50;
@@ -780,7 +796,7 @@ void worker_thread(HANDLE h_iocp)
 							}
 					}
 					session->_lock.unlock();
-					std::cout << NPC->target_id << "플레이어가 " << NPC->_id << "몬스터에게 50 데미지를 입음\n";
+					std::cout << NPC->target_id << "플레이어가 " << NPC->a_type << ", " << NPC->m_type << " 타입의 " << NPC->_id << "몬스터에게 50 데미지를 입음\n";
 					session->send_statchange_packet();
 					bool isHealing = false;
 					if (atomic_compare_exchange_strong(&session->is_healing, &isHealing, true)) {
@@ -799,6 +815,7 @@ void worker_thread(HANDLE h_iocp)
 				timer_queue.push(npc_ev);
 			}
 			else {
+				NPC->target_id = -1;
 				NPC->_is_active = false;
 			}
 		}
@@ -897,41 +914,59 @@ void InitializeMap()
 	}
 }
 
-void InitializeNPC()
+void InitializeNPC(const string& filename)
 {
 	std::cout << "NPC intialize begin.\n";
-	for (int i = 0; i < MAX_USER; ++i) {
+	int i = 0;
+	while (i < MAX_USER) {
 		SESSION* PLAYER = new SESSION();
-		characters[i] = PLAYER;
+		characters[i++] = PLAYER;
 	}
 
-	for (int i = MAX_USER; i < MAX_USER + MAX_NPC; ++i) {
-		MONSTER* NPC = new MONSTER();
-		NPC->point.x = rand() % W_WIDTH;
-		NPC->point.y = rand() % W_HEIGHT;
-		sprintf_s(NPC->_name, "NPC%d", i);
-		NPC->_state = ST_INGAME;
-		NPC->a_type = static_cast<ATTACK_TYPE>((i % 4) / 2);//(rand() % 2);
-		NPC->m_type = static_cast<MOVE_TYPE>((i % 4) % 2);//(rand() % 2);
-		NPC->Level = rand() % 9;
-		NPC->HP = NPC->Level * 100;
-		NPC->EXP = NPC->Level * NPC->Level * 2 * int(NPC->a_type + 1) * int(NPC->m_type + 1);
-		//auto L = NPC->_L = luaL_newstate();
-		//luaL_openlibs(L);
-		//luaL_loadfile(L, "npc.lua");
-		//lua_pcall(L, 0, 0, 0);
+	//for (int i = MAX_USER; i < MAX_USER + MAX_NPC; ++i) {
+	//	MONSTER* NPC = new MONSTER();
+	//	NPC->point.x = rand() % W_WIDTH;
+	//	NPC->point.y = rand() % W_HEIGHT;
+	//	sprintf_s(NPC->_name, "NPC%d", i);
+	//	NPC->_state = ST_INGAME;
+	//	NPC->a_type = static_cast<ATTACK_TYPE>(rand() % 2);
+	//	NPC->m_type = static_cast<MOVE_TYPE>(rand() % 2);
+	//	NPC->Level = rand() % 9;
+	//	NPC->HP = NPC->Level * 100;
+	//	NPC->EXP = NPC->Level * NPC->Level * 2 * int(NPC->a_type + 1) * int(NPC->m_type + 1);
+	//	characters[i] = NPC;
+	//	characters[i]->_id = i;
 
-		//lua_getglobal(L, "set_uid");
-		//lua_pushnumber(L, i);
-		//lua_pcall(L, 1, 0, 0);
-		//// lua_pop(L, 1);// eliminate set_uid from stack after call
+	//}
 
-		//lua_register(L, "API_SendMessage", API_SendMessage);
-		//lua_register(L, "API_get_x", API_get_x);
-		//lua_register(L, "API_get_y", API_get_y);
-		characters[i] = NPC;
-		characters[i]->_id = i;
-
+	ifstream file(filename);
+	if (file.is_open()) {
+		string line;
+		while (std::getline(file, line)) {
+			if (line.find("x: ") != std::string::npos) {
+				MONSTER* NPC = new MONSTER();
+				NPC->_state = ST_INGAME;
+				NPC->point.x = std::stoi(line.substr(line.find(": ") + 2));
+				std::getline(file, line);
+				NPC->point.y = std::stoi(line.substr(line.find(": ") + 2));
+				std::getline(file, line);
+				NPC->HP = std::stoi(line.substr(line.find(": ") + 2));
+				std::getline(file, line);
+				NPC->Level = std::stoi(line.substr(line.find(": ") + 2));
+				std::getline(file, line);
+				NPC->EXP = std::stoi(line.substr(line.find(": ") + 2));
+				std::getline(file, line);
+				NPC->a_type = static_cast<ATTACK_TYPE>(std::stoi(line.substr(line.find(": ") + 2)));
+				std::getline(file, line);
+				NPC->m_type = static_cast<MOVE_TYPE>(std::stoi(line.substr(line.find(": ") + 2)));
+				characters[i] = NPC;
+				characters[i]->_id = i;
+				i++;
+			}
+		}
+	}
+	else {
+		std::cerr << "NPC initialize Failed.\n";
 	}
 	std::cout << "NPC initialize end.\n";
 }
@@ -1014,9 +1049,11 @@ int main()
 	SOCKADDR_IN cl_addr{};
 	int addr_size = sizeof(cl_addr);
 
+	string monsterfilename = "monsters.txt";
 
-	InitializeNPC();
+	InitializeNPC(monsterfilename);
 	InitializeMap();
+
 
 	h_iocp = CreateIoCompletionPort(INVALID_HANDLE_VALUE, 0, 0, 0);
 	CreateIoCompletionPort((HANDLE)listenSocket, h_iocp, 9999, 0);

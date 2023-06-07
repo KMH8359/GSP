@@ -70,6 +70,10 @@ public:
 		strcpy_s(add_packet.name, obj->_name);
 		add_packet.size = sizeof(add_packet);
 		add_packet.type = SC_ADD_OBJECT;
+		if (obj->_id >= MAX_USER) {
+			auto npc = (MONSTER*)obj;
+			add_packet.monster_type = npc->a_type * 2 + npc->m_type;
+		}
 		add_packet.point.x = obj->point.x;
 		add_packet.point.y = obj->point.y;
 		_view_list.s_mutex.lock();
