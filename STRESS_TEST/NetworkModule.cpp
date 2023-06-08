@@ -66,7 +66,7 @@ struct ALIEN {
 
 array<int, MAX_TEST> client_map;
 array<CLIENT, MAX_TEST> g_clients;
-array<ALIEN, MAX_NPC> g_npcs;
+array<ALIEN, MAX_CLIENTS + MAX_NPC> g_npcs;
 atomic_int num_connections;
 atomic_int client_to_close;
 atomic_int active_clients;
@@ -368,12 +368,24 @@ void Test_Thread()
 			if (false == g_clients[i].connected) continue;
 			if (g_clients[i].last_move_time + 1s > high_resolution_clock::now()) continue;
 			g_clients[i].last_move_time = high_resolution_clock::now();
-			CS_MOVE_PACKET my_packet;
-			my_packet.size = sizeof(my_packet);
-			my_packet.type = CS_MOVE;
-			my_packet.direction = rand() % 4;
-			my_packet.move_time = static_cast<unsigned>(duration_cast<milliseconds>(high_resolution_clock::now().time_since_epoch()).count());
-			SendPacket(i, &my_packet);
+			int pac = rand() % 2;
+			switch (pac) {
+			case 0: {
+				CS_MOVE_PACKET my_packet;
+				my_packet.size = sizeof(my_packet);
+				my_packet.type = CS_MOVE;
+				my_packet.direction = rand() % 4;
+				my_packet.move_time = static_cast<unsigned>(duration_cast<milliseconds>(high_resolution_clock::now().time_since_epoch()).count());
+				SendPacket(i, &my_packet);
+			}
+				break;
+			case 1: {
+				CS_ATTACK_PACKET my_packet;
+				my_packet.size = sizeof(my_packet);
+				my_packet.type = CS_ATTACK;
+				SendPacket(i, &my_packet);
+			}
+			}
 		}
 	}
 }

@@ -28,9 +28,11 @@ char m_login_string[2][NAME_SIZE]{ "" };
 unsigned short chat_length = 0;
 unsigned short login_state = 0;
 
-sf::Sprite game_logo;
+sf::Sprite* game_logo;
 sf::Texture* logo_image;
 
+sf::Sprite* background;
+sf::Texture* background_image;
 void ConvertCharArrayToWideCharArray(const char* source, size_t sourceSize, wchar_t* destination, size_t destinationSize)
 {
 	std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
@@ -140,7 +142,7 @@ public:
 
 	short left = 0;
 	short top = 0;
-	short type = -1; // 몬스터 오브젝트의 타입
+
 	//chrono::system_clock::time_point m_lastFrameTime;
 	char name[NAME_SIZE];
 	OBJECT(sf::Texture& t, int x, int y, int x2, int y2) {
@@ -253,7 +255,8 @@ sf::Texture* chat_box;
 
 void client_initialize()
 {
-	
+	game_logo = new sf::Sprite;
+	background = new sf::Sprite;
 
 	board = new sf::Texture;
 	pieces = new sf::Texture;
@@ -263,6 +266,7 @@ void client_initialize()
 	login_ui = new sf::Texture;
 	logo_image = new sf::Texture;
 	chat_box = new sf::Texture;
+	background_image = new sf::Texture;
 
 	board->loadFromFile("tilemap.bmp");
 	pieces->loadFromFile("character.png");
@@ -272,6 +276,7 @@ void client_initialize()
 	login_ui->loadFromFile("loginUI.png");
 	logo_image->loadFromFile("logo.png");
 	chat_box->loadFromFile("chat_box.png");
+	background_image->loadFromFile("bg.png");
 	if (false == g_font.loadFromFile("cour.ttf")) {
 		cout << "Font Loading Error!\n";
 		exit(-1);
@@ -291,8 +296,11 @@ void client_initialize()
 	Login_UI = new OBJECT{ *login_ui, 0, 0, 300, 80 };
 	Login_UI->a_move(350, 800);
 
-	game_logo.setTexture(*logo_image);
-	game_logo.setPosition(0, 100);
+	game_logo->setTexture(*logo_image);
+	game_logo->setPosition(0, 100);
+
+	background->setTexture(*background_image);
+	background->setPosition(0, 0);
 
 	Login_ID_Text.setFont(g_font);
 	Login_ID_Text.setCharacterSize(60);
@@ -328,19 +336,6 @@ void client_initialize()
 	}
 
 	avatar = OBJECT{ *pieces, 0, 200, 50, 50 };
-}
-
-void client_finish()
-{
-	players.clear();
-	delete board;
-	delete pieces;
-	delete monsters;
-	delete hp_bar;
-	delete lv;
-	delete login_ui;
-	delete logo_image;
-	delete chat_box;
 }
 
 void ProcessPacket(char* ptr)
@@ -395,8 +390,8 @@ void ProcessPacket(char* ptr)
 			players[id].show();
 		}
 		else { // id % 4로 몬스터 타입이 결정됨
-			players[id].type = (int)my_packet->monster_type % 4;
-			players[id] = OBJECT{ *monsters, (players[id].type / 2) * 150,  (players[id].type % 2) * 200, 50, 50 };
+			int type = (int)my_packet->monster_type % 4;
+			players[id] = OBJECT{ *monsters, (type / 2) * 150,  (type % 2) * 200, 50, 50 };
 			players[id].id = id;
 			players[id].move(my_packet->point.x, my_packet->point.y);
 			//players[id].set_name(my_packet->name);
@@ -425,8 +420,6 @@ void ProcessPacket(char* ptr)
 			rect.top = players[other_id].top + my_packet->direction * 50;
 			players[other_id].m_sprite.setTextureRect(rect);
 			players[other_id].animate();
-			//players[other_id].a_resize((players[other_id].type / 2) * 150,
-			//	((players[other_id].type % 2) * 200) + my_packet->direction * 50, 50, 50);
 		}
 		break;
 	}
@@ -517,12 +510,13 @@ void login_scene()
 
 
 
-	for (int i = 0; i < SCREEN_WIDTH; ++i)
-		for (int j = 0; j < SCREEN_HEIGHT; ++j)
-		{
-			white_tile.a_move(TILE_WIDTH * i, TILE_WIDTH * j);
-			white_tile.a_draw();
-		}
+	//for (int i = 0; i < SCREEN_WIDTH; ++i)
+	//	for (int j = 0; j < SCREEN_HEIGHT; ++j)
+	//	{
+	//		white_tile.a_move(TILE_WIDTH * i, TILE_WIDTH * j);
+	//		white_tile.a_draw();
+	//	}
+	g_window->draw(*background);
 
 	
 	Login_ID_Text.setString(m_login_string[0]);
@@ -533,7 +527,7 @@ void login_scene()
 	}
 	g_window->draw(Login_ID_Text);
 	g_window->draw(Login_PW_Text);
-	g_window->draw(game_logo);
+	g_window->draw(*game_logo);
 	Login_UI->a_draw();
 }
 
@@ -589,6 +583,22 @@ void send_packet(void* packet)
 	s_socket.send(packet, p[0], sent);
 }
 
+void client_finish()
+{
+	CS_LOGOUT_PACKET p;
+	p.size = sizeof(p);
+	p.type = CS_LOGOUT;
+	send_packet(&p);
+	players.clear();
+	delete board;
+	delete pieces;
+	delete monsters;
+	delete hp_bar;
+	delete lv;
+	delete login_ui;
+	delete logo_image;
+	delete chat_box;
+}
 int main()
 {
 	wcout.imbue(locale("korean"));
@@ -665,6 +675,7 @@ int main()
 				}
 			}
 			if (event.type == sf::Event::KeyPressed && login_state < 2) {
+
 				if (event.key.code >= sf::Keyboard::A && event.key.code <= sf::Keyboard::Z)
 				{
 					char inputChar = static_cast<char>('a' + (event.key.code - sf::Keyboard::A));
@@ -675,6 +686,7 @@ int main()
 					char inputChar = static_cast<char>('0' + (event.key.code - sf::Keyboard::Num0));
 					m_login_string[login_state][chat_length++] = inputChar;
 				}
+
 				else if (event.key.code == sf::Keyboard::Backspace)
 				{
 					if (chat_length) {
@@ -686,24 +698,17 @@ int main()
 					login_state++;
 					chat_length = 0;
 				}
-				//avatar.set_chat(m_mess);
 			}
 		}
 		window.clear();
 		login_scene();
 		window.display();
 	}
-	//CS_LOGIN_PACKET p;
-	//p.size = sizeof(p);
-	//p.type = CS_LOGIN;
 
-	//string player_name{ "P" };
-	//player_name += to_string(GetCurrentProcessId());
-
-	//strcpy_s(p.name, player_name.c_str());
-	//send_packet(&p);
-	//avatar.set_name(p.name);
-
+	delete logo_image;
+	delete game_logo;
+	delete background_image;
+	delete background;
 	delete Login_UI;
 	for (int i = 0; i < 2; ++i)
 		delete LOGIN_BAR[i];

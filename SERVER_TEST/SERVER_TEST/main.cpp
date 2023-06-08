@@ -15,9 +15,9 @@ SOCKET listenSocket, g_c_socket;
 OVER_EXP g_a_over;
 
 TILEPOINT Trace_Player(TILEPOINT origin, TILEPOINT destination);
+void disconnect(int c_id);
 
-
-#define USE_LOGINDB 1
+//#define USE_DB 
 
 
 TILEPOINT vec[4]{
@@ -272,7 +272,7 @@ int get_new_client_id()
 void WakeUpNPC(int npc_id, int waker)
 {
 	if (is_pc(npc_id)) {
-		std::cout << "ERROR" << endl;
+		std::cout << "ERROR\n";
 	}
 	auto NPC = (MONSTER*)characters[npc_id];
 
@@ -324,6 +324,11 @@ void process_packet(int c_id, char* packet)
 		wcscpy_s(ev.user_password, sizeof(ev.user_password) / sizeof(wchar_t), p->password);
 		ev.session_id = c_id;
 		db_queue.push(ev);
+	}
+				  break;
+	case CS_LOGOUT: {
+		cout << c_id << " 플레이어 로그아웃\n";
+		disconnect(c_id);
 	}
 				  break;
 	case CS_MOVE: {
@@ -407,18 +412,18 @@ void process_packet(int c_id, char* packet)
 			if (is_npc(obj_id) && can_attack(c_id, obj_id)) {
 				auto target_monster = (MONSTER*)obj;
 				target_monster->HP.fetch_sub(50);
-				std::cout << target_monster->a_type << " a_type," << target_monster->m_type << " m_type의 " <<
-					target_monster->_id << "몬스터가 " << session->_id << "플레이어에게 50 데미지를 입음\n";
+				//std::cout << target_monster->a_type << " a_type," << target_monster->m_type << " m_type의 " << target_monster->_id << "몬스터가 " << session->_id << "플레이어에게 50 데미지를 입음\n";
 				if (target_monster->target_id < 0) target_monster->target_id = c_id;
 				if (obj->HP.load() <= 0) {
 					bool alive = true;
 					if (false == atomic_compare_exchange_strong(&obj->is_alive, &alive, false))
 						return;
-					std::cout << obj->_id << " 몬스터 부활 타이머 시작\n";
+					//std::cout << obj->_id << " 몬스터 부활 타이머 시작\n";
 					TIMER_EVENT ev{ obj->_id, chrono::system_clock::now() + 30s, EV_REVIVE, 0 };
 					timer_queue.push(ev);
 					session->EXP += obj->EXP;
-					std::cout << session->_id << "플레이어가 " << obj->EXP << "경험치 획득\n";
+					//std::cout << session->_id << "플레이어가 " << obj->EXP << "경험치 획득\n";
+#ifdef USE_DB
 					DB_EVENT update_event;
 					update_event._event = EV_SAVE;
 					wchar_t* wcharArray = new wchar_t[NAME_SIZE] {L""};
@@ -430,6 +435,7 @@ void process_packet(int c_id, char* packet)
 					update_event.Exp = session->EXP;
 					db_queue.push(update_event);
 					delete[] wcharArray;
+#endif
 					obj->_view_list.s_mutex.lock_shared();
 					for (auto& player_id : obj->_view_list) {
 						auto session = (SESSION*)characters[player_id];
@@ -509,7 +515,7 @@ void npc_move(int npc_id)
 		if (true == can_see(npc->_id, obj->_id)) {
 			new_vl.insert(obj->_id);
 			if (npc->a_type == AGRO && npc->target_id < 0 && in_monsterAgro(npc->_id, obj->_id)) {
-				cout << npc->a_type << ", " << npc->m_type << "타입 몬스터 " << npc->_id << "가 " << obj->_id << "플레이어 추격 시작\n";
+				//cout << npc->a_type << ", " << npc->m_type << "타입 몬스터 " << npc->_id << "가 " << obj->_id << "플레이어 추격 시작\n";
 				npc->target_id = obj->_id;
 			}
 		}
@@ -796,11 +802,11 @@ void worker_thread(HANDLE h_iocp)
 							}
 					}
 					session->_lock.unlock();
-					std::cout << NPC->target_id << "플레이어가 " << NPC->a_type << ", " << NPC->m_type << " 타입의 " << NPC->_id << "몬스터에게 50 데미지를 입음\n";
+					//std::cout << NPC->target_id << "플레이어가 " << NPC->a_type << ", " << NPC->m_type << " 타입의 " << NPC->_id << "몬스터에게 50 데미지를 입음\n";
 					session->send_statchange_packet();
 					bool isHealing = false;
 					if (atomic_compare_exchange_strong(&session->is_healing, &isHealing, true)) {
-						std::cout << session->_id << "플레이어 회복 시작\n";
+						//std::cout << session->_id << "플레이어 회복 시작\n";
 						TIMER_EVENT heal_ev{ session->_id, chrono::system_clock::now() + 5s, EV_PLAYERHP_RECOVERY, 0 };
 						timer_queue.push(heal_ev);
 					}
@@ -845,20 +851,19 @@ void worker_thread(HANDLE h_iocp)
 		case OP_HEAL: {
 			delete ex_over;
 			auto session = (SESSION*)characters[key];
-			std::cout << session->_id << "회복중 - " << session->HP.load() << " / " << session->MAX_HP << endl;
-			if (session->HP.load() < session->MAX_HP) {
+			if (session->_state.load() == ST_INGAME && session->HP.load() < session->MAX_HP) {
 				session->HP.fetch_add(session->MAX_HP / 10);
 				if (session->HP.load() > session->MAX_HP) {
 					session->HP.store(session->MAX_HP);
 					session->is_healing.store(false);
 				}
-				std::cout << session->_id << "플레이어의 체력이 " << session->HP.load() << "만큼 회복됨\n";
+				//std::cout << session->_id << "플레이어의 체력이 " << session->HP.load() << "만큼 회복됨\n";
 				session->send_statchange_packet();
 				TIMER_EVENT heal_ev{ static_cast<int>(key), chrono::system_clock::now() + 5s, EV_PLAYERHP_RECOVERY, 0 };
 				timer_queue.push(heal_ev);
 			}
 			else {
-				std::cout << session->_id << "플레이어 회복 종료\n";
+				//std::cout << session->_id << "플레이어 회복 종료\n";
 			}
 		}
 					break;
