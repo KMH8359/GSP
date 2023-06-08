@@ -9,10 +9,13 @@
 #include <vector>
 #include <codecvt>
 #include <mutex>
+#include <queue>
+#include <stack>
 #include <string>
 #include <shared_mutex>
 #include <unordered_set>
 #include <unordered_map>
+
 #include <atomic>
 #include <concurrent_priority_queue.h>
 #include <concurrent_queue.h>
@@ -134,11 +137,10 @@ struct TILEPOINT
 };
 
 struct PointHash {
-	std::size_t operator()(const TILEPOINT& p) const {
-		std::size_t hash = 17;
-		hash = hash * 31 + std::hash<int>()(p.x);
-		hash = hash * 31 + std::hash<int>()(p.y);
-		return hash;
+	size_t operator()(const TILEPOINT& point) const {
+		size_t h1 = std::hash<short>()(point.x);
+		size_t h2 = std::hash<short>()(point.y);
+		return h1 ^ (h2 << 1);
 	}
 };
 
@@ -148,34 +150,73 @@ struct PointEqual {
 	}
 };
 
-
 class A_star_Node
 {
 public:
-	int F = 0;
-	int G = 0;
-	int H = 0;
+	float F = 0;
+	float G = 0;
+	float H = 0;
 	shared_ptr<A_star_Node> parent;
 	TILEPOINT Pos = { 0,0 };
 	A_star_Node() {}
-	A_star_Node(TILEPOINT _Pos, TILEPOINT _Dest_Pos, int _G, shared_ptr<A_star_Node> node)
-	{
-		Pos = _Pos;
-		G = _G;
-		H = abs(_Dest_Pos.y - Pos.y) + abs(_Dest_Pos.x - Pos.x);
-		F = G + H;
-		if (node) {
-			parent = node;
-		}
-	}
-	void Initialize(TILEPOINT _Pos, TILEPOINT _Dest_Pos, int _G, shared_ptr<A_star_Node> node)
-	{
-		Pos = _Pos;
-		G = _G;
-		H = abs(_Dest_Pos.y - Pos.y) + abs(_Dest_Pos.x - Pos.x);
-		F = G + H;
-		if (node) {
-			parent = node;
-		}
+	A_star_Node(TILEPOINT _Pos, float _G, float _H, shared_ptr<A_star_Node> _parent)
+		: Pos(_Pos), G(_G), H(_H), F(_G + _H), parent(_parent) {}
+
+};
+
+struct CompareNodes {
+	bool operator()(const shared_ptr<A_star_Node>& node1, const shared_ptr<A_star_Node>& node2) {
+		return node1->F > node2->F;
 	}
 };
+
+
+//class AStar_Pool {
+//private:
+//	queue<A_star_Node*> objectQueue;
+//	mutex pool_lock;
+//public:
+//	AStar_Pool()
+//	{
+//		for (int i = 0; i < 4000; ++i) {
+//			objectQueue.push(make_shared<A_star_Node>());
+//		}
+//	}
+//	~AStar_Pool()
+//	{
+//	}
+//
+//	A_star_Node* GetMemory(XMFLOAT3 _Pos, XMFLOAT3 _Dest_Pos, float _G = 0, A_star_Node* node = nullptr)
+//	{
+//		lock_guard<mutex> ll{ pool_lock };
+//		if (objectQueue.empty()) {
+//			cout << "AStar_Pool called add memory request\n";
+//			for (int i = 0; i < 500; ++i)
+//				objectQueue.push(make_shared<A_star_Node>());
+//		}
+//		if (!objectQueue.empty()) {
+//			auto& front = objectQueue.front();
+//			objectQueue.pop();
+//
+//			front->Initialize(_Pos, _Dest_Pos, _G, node);
+//
+//			return front;
+//		}
+//		else {
+//			return nullptr;
+//		}
+//	}
+//
+//	void ReturnMemory(A_star_Node* Mem)
+//	{
+//		Mem->parent.reset();
+//		Mem->Pos = { 0,0,0 };
+//		Mem->G = Mem->H = Mem->F = 0;
+//		lock_guard<mutex> ll{ pool_lock };
+//		objectQueue.push(Mem);
+//	}
+//	void PrintSize()
+//	{
+//		cout << "CurrentSize - " << objectQueue.size() << endl;
+//	}
+//};

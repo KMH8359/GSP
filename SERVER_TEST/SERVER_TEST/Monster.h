@@ -11,6 +11,7 @@ public:
 	mutex	_ll;
 	ATTACK_TYPE a_type;
 	MOVE_TYPE m_type;
+	std::stack<TILEPOINT> path;
 public:
 	MONSTER()
 	{
@@ -19,5 +20,19 @@ public:
 
 	~MONSTER() {}
 
-	//TILEPOINT Trace_Player(TILEPOINT origin, TILEPOINT destination);
+	void move();
+
+	void set_direction(int dx, int dy)
+	{
+		if (dx == 0 && dy == 1)
+			direction = 0;  // ╩С
+		else if (dx == -1 && dy == 0)
+			direction = 1;  // аб
+		else if (dx == 0 && dy == -1)
+			direction = 2;  // го
+		else if (dx == 1 && dy == 0)
+			direction = 3;  // ©Л
+	}
+
+	stack<TILEPOINT> Trace_Player(const TILEPOINT start, const TILEPOINT dest);
 };

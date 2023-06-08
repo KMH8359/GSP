@@ -14,7 +14,6 @@ array<array<bool, W_WIDTH>, W_HEIGHT> GridMap;
 SOCKET listenSocket, g_c_socket;
 OVER_EXP g_a_over;
 
-TILEPOINT Trace_Player(TILEPOINT origin, TILEPOINT destination);
 void disconnect(int c_id);
 
 //#define USE_DB 
@@ -35,6 +34,21 @@ void ConvertCharArrayToWideCharArray(const char* source, size_t sourceSize, wcha
 	wcsncpy(destination, wideString.c_str(), destinationSize - 1);
 	destination[destinationSize - 1] = L'\0';
 }
+
+float Heuristic(const TILEPOINT& start, const TILEPOINT& dest) {
+	return abs(dest.y - start.y) + abs(dest.x - start.x);
+}
+
+stack<TILEPOINT> ReconstructPath(shared_ptr<A_star_Node> node) {
+	stack<TILEPOINT> path;
+	while (node->parent) {
+		path.push(node->Pos);
+		node = node->parent;
+	}
+	//std::reverse(path.begin(), path.end());
+	return path;
+}
+
 
 void HandleDiagnosticRecord(SQLHANDLE hHandle, SQLSMALLINT hType, RETCODE RetCode) {
 	SQLSMALLINT iRec = 0;
@@ -290,7 +304,7 @@ void process_packet(int c_id, char* packet)
 	switch (packet[2]) {
 	case CS_LOGIN: {
 		CS_LOGIN_PACKET* p = reinterpret_cast<CS_LOGIN_PACKET*>(packet);
-#ifdef USE_LOGINDB
+#ifdef USE_DB
 		DB_EVENT ev;
 		ev._event = EV_SIGNIN;
 		wcscpy_s(ev.user_id, sizeof(ev.user_id) / sizeof(wchar_t), p->id);
@@ -469,41 +483,41 @@ void disconnect(int c_id)
 	session->_state.store(ST_FREE);
 }
 
-void npc_move(int npc_id)
+void MONSTER::move()
 {
-	auto npc = (MONSTER*)characters[npc_id];
-	unordered_set<int> old_vl = npc->_view_list;
+	unordered_set<int> old_vl = _view_list;
 	
-	if (npc->target_id > -1) {
-		if (!can_see(npc_id, npc->target_id)) return;
-		TILEPOINT new_point = Trace_Player(npc->point, characters[npc->target_id]->point);
-		int dx = new_point.x - npc->point.x;
-		int dy = new_point.y - npc->point.y;
+	if (target_id > -1) {
+		if (!can_see(_id, target_id)) return;
+		if (path.empty()) {
+			// 경로가 비어있으면 다시 길을 찾습니다
+			TILEPOINT start = point;
+			TILEPOINT dest = characters[target_id]->point;
+			path = Trace_Player(start, dest);
+			if (path.empty()) return;  // 경로가 없으면 이동하지 않습니다.
+		}
+		TILEPOINT next_point = path.top();
+		int dx = next_point.x - point.x;
+		int dy = next_point.y - point.y;
 
-		// 방향 계산
-		if (dx == 0 && dy == 1)
-			npc->direction = 0;  // 상
-		else if (dx == -1 && dy == 0)
-			npc->direction = 1;  // 좌
-		else if (dx == 0 && dy == -1)
-			npc->direction = 2;  // 하
-		else if (dx == 1 && dy == 0)
-			npc->direction = 3;  // 우
-		npc->point = new_point;
+		set_direction(dx, dy);
+
+		point = next_point;
+		path.pop();  // 다음 좌표로 이동했으므로 경로에서 제거합니다.
 	}
 	else {
-		int x = npc->point.x;
-		int y = npc->point.y;
-		npc->direction = rand() % 4;
-		switch (npc->direction) {
+		int x = point.x;
+		int y = point.y;
+		direction = rand() % 4;
+		switch (direction) {
 		case 0: if (y < (W_HEIGHT - 1)) y++; break;
 		case 1: if (x > 0) x--; break;
 		case 2: if (y > 0) y--; break;
-		case 3:if (x < (W_WIDTH - 1)) x++; break;
+		case 3: if (x < (W_WIDTH - 1)) x++; break;
 		}
 		if (GridMap[x][y]) {
-			npc->point.x = x;
-			npc->point.y = y;
+			point.x = x;
+			point.y = y;
 		}
 	}
 
@@ -512,11 +526,11 @@ void npc_move(int npc_id)
 	for (int i = 0; i < MAX_USER; ++i) {
 		auto& obj = characters[i];
 		if (ST_INGAME != obj->_state.load()) continue;
-		if (true == can_see(npc->_id, obj->_id)) {
+		if (true == can_see(_id, obj->_id)) {
 			new_vl.insert(obj->_id);
-			if (npc->a_type == AGRO && npc->target_id < 0 && in_monsterAgro(npc->_id, obj->_id)) {
-				//cout << npc->a_type << ", " << npc->m_type << "타입 몬스터 " << npc->_id << "가 " << obj->_id << "플레이어 추격 시작\n";
-				npc->target_id = obj->_id;
+			if (a_type == AGRO && target_id < 0 && in_monsterAgro(_id, obj->_id)) {
+				//cout << a_type << ", " << m_type << "타입 몬스터 " << _id << "가 " << obj->_id << "플레이어 추격 시작\n";
+				target_id = obj->_id;
 			}
 		}
 	}
@@ -524,10 +538,10 @@ void npc_move(int npc_id)
 	for (auto pl : new_vl) {
 		auto session = (SESSION*)characters[pl];
 		if (0 == old_vl.count(pl)) {
-			session->send_add_player_packet(characters[npc->_id]);
+			session->send_add_player_packet(characters[_id]);
 		}
 		else {
-			session->send_move_packet(characters[npc->_id]);
+			session->send_move_packet(characters[_id]);
 		}
 	}
 
@@ -535,16 +549,16 @@ void npc_move(int npc_id)
 		if (0 == new_vl.count(pl)) {
 			auto session = (SESSION*)characters[pl];
 			session->_view_list.s_mutex.lock_shared();
-			if (0 != session->_view_list.count(npc->_id)) {
+			if (0 != session->_view_list.count(_id)) {
 				session->_view_list.s_mutex.unlock_shared();
-				session->send_remove_player_packet(npc->_id);
+				session->send_remove_player_packet(_id);
 			}
 			else {
 				session->_view_list.s_mutex.unlock_shared();
 			}
 		}
 	}
-	npc->_view_list = new_vl;
+	_view_list = new_vl;
 }
 
 void do_lockednpc_update(int npc_id)
@@ -583,67 +597,52 @@ void do_lockednpc_update(int npc_id)
 	npc->_view_list = new_vl;
 }
 
+stack<TILEPOINT> MONSTER::Trace_Player(const TILEPOINT start, const TILEPOINT dest)
+{
+	if (start == dest) return stack<TILEPOINT>();
 
-unordered_map<TILEPOINT, shared_ptr<A_star_Node>, PointHash, PointEqual>::iterator getNode(unordered_map<TILEPOINT, shared_ptr<A_star_Node>, PointHash, PointEqual>& m_List)
-{
-	return min_element(m_List.begin(), m_List.end(),
-		[](const pair<const TILEPOINT, shared_ptr<A_star_Node>>& p1, const pair<const TILEPOINT, shared_ptr<A_star_Node>>& p2)
-		{
-			return p1.second->F < p2.second->F;
-		});
-}
-bool check_openList(TILEPOINT& _Pos, int _G, shared_ptr<A_star_Node> s_node, unordered_map<TILEPOINT, shared_ptr<A_star_Node>, PointHash, PointEqual>& m_List)
-{
-	auto iter = m_List.find(_Pos);
-	if (iter != m_List.end()) {
-		if ((*iter).second->G > _G) {
-			(*iter).second->G = _G;
-			(*iter).second->F = (*iter).second->G + (*iter).second->H;
-			(*iter).second->parent = s_node;
-		}
-		return false;
-	}
-	return true;
-}
-TILEPOINT Trace_Player(TILEPOINT origin, TILEPOINT destination)
-{
-	if (origin == destination) return origin;
 	unordered_set<TILEPOINT, PointHash, PointEqual> closelist{};
-	unordered_map<TILEPOINT, shared_ptr<A_star_Node>, PointHash, PointEqual> openlist;
-	openlist.reserve(200);
-	closelist.reserve(600);
-	shared_ptr<A_star_Node> S_Node;
-	
-	openlist.emplace(origin, make_shared<A_star_Node>(origin, destination, 0.f, nullptr));
+	unordered_map<TILEPOINT, shared_ptr<A_star_Node>, PointHash, PointEqual> openList;
 
-	while (!openlist.empty())
+	openList.reserve(100);
+
+	priority_queue<shared_ptr<A_star_Node>, vector<shared_ptr<A_star_Node>>, CompareNodes> pq;
+	
+	openList[start] = make_shared<A_star_Node>(start, 0.f, Heuristic(start, dest), nullptr);
+	pq.push(openList[start]);
+
+	while (!pq.empty())
 	{
-		auto iter = getNode(openlist);
-		S_Node = (*iter).second;
-		if (point_compare(S_Node->Pos, destination))
-		{
-			while (S_Node->parent != nullptr)
-			{
-				if (point_compare(S_Node->parent->Pos, origin))
-				{
-					return S_Node->Pos;
-				}
-				S_Node = S_Node->parent;
+		shared_ptr<A_star_Node> current = pq.top();
+		pq.pop();
+
+		if (current->Pos == dest) {
+			return ReconstructPath(current);
+		}
+
+		closelist.insert(current->Pos);
+
+		for (int i = 0; i < 4; ++i) {
+			TILEPOINT neighborPos  = current->Pos + vec[i];
+
+			if (GridMap[neighborPos.x][neighborPos.y] == false || closelist.count(neighborPos) > 0)
+				continue;
+
+			int neighborG = current->G + abs(vec[i].x) + abs(vec[i].y);
+
+			auto neighborIter = openList.find(neighborPos);
+			if (neighborIter == openList.end() || neighborG < neighborIter->second->G) {
+				float neighborH = Heuristic(neighborPos, dest);
+				float neighborF = neighborG + neighborH;
+				shared_ptr<A_star_Node> neighborNode = make_shared<A_star_Node>(neighborPos, neighborG, neighborH, current);
+				openList.emplace(neighborPos, neighborNode);
+				pq.push(neighborNode);
 			}
 		}
-		for (int i = 0; i < 4; i++) {
-			TILEPOINT _Pos = S_Node->Pos + vec[i];
-			int _G = S_Node->G + abs(vec[i].x) + abs(vec[i].y);
-			if (closelist.count(_Pos) == 0 && GridMap[_Pos.x][_Pos.y] &&
-				check_openList(_Pos, _G, S_Node, openlist)) {
-				openlist.emplace(_Pos, make_shared<A_star_Node>(_Pos, destination, _G, S_Node));
-			}
-		}
-		closelist.emplace(S_Node->Pos);
-		openlist.erase(iter);
 	}
-	return origin;
+	return stack<TILEPOINT>();
 }
+
 void worker_thread(HANDLE h_iocp)
 {
 	while (true) {
@@ -815,7 +814,8 @@ void worker_thread(HANDLE h_iocp)
 					do_lockednpc_update(static_cast<int>(key));
 				}
 				else {
-					npc_move(static_cast<int>(key));
+					NPC->move();
+					//npc_move(static_cast<int>(key));
 				}
 				TIMER_EVENT npc_ev{ static_cast<int>(key), chrono::system_clock::now() + 1s, EV_RANDOM_MOVE, 0 };
 				timer_queue.push(npc_ev);
@@ -1037,7 +1037,7 @@ int main()
 {
 	wcout.imbue(locale("korean"));
 	setlocale(LC_ALL, "korean");
-
+	cout << sizeof(A_star_Node) << endl;
 	WSADATA WSAData;
 	WSAStartup(MAKEWORD(2, 2), &WSAData);
 	listenSocket = WSASocket(AF_INET, SOCK_STREAM, 0, NULL, 0, WSA_FLAG_OVERLAPPED);

@@ -782,7 +782,7 @@ int main()
 					window.close();
 					break;
 				case sf::Keyboard::Space:
-					CS_ATTACK_PACKET p;
+					CS_ATTACK_PACKET p; 
 					p.size = sizeof(p);
 					p.type = CS_ATTACK;
 					send_packet(&p);
