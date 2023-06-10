@@ -13,12 +13,17 @@ public:
 	MOVE_TYPE m_type;
 	std::stack<TILEPOINT> path;
 public:
+	AStar_Pool* m_pool;
 	MONSTER()
 	{
+		m_pool = new AStar_Pool(300);
 		HP = MAX_HP = 200;
 	}
 
-	~MONSTER() {}
+	~MONSTER() 
+	{
+		delete m_pool;
+	}
 
 	void move();
 
@@ -33,6 +38,5 @@ public:
 		else if (dx == 1 && dy == 0)
 			direction = 3;  // ¿ì
 	}
-
 	stack<TILEPOINT> Trace_Player(const TILEPOINT start, const TILEPOINT dest);
 };

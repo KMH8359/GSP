@@ -349,7 +349,7 @@ void ProcessPacket(char* ptr)
 		avatar.id = g_myid;
 		avatar.HP = packet->hp;
 		avatar.MAX_HP = packet->max_hp;
-		cout << avatar.HP << "/" << avatar.MAX_HP << endl;
+		cout << packet->point.x << ", " << packet->point.y << endl;
 		HPBAR[0].a_resize(0, 0, avatar.HP, 50);
 		HPBAR[1].a_resize(0, 0, -1 * (avatar.MAX_HP - avatar.HP), 50);
 		HPBAR[1].a_move(100 + avatar.HP, 0);
@@ -382,7 +382,7 @@ void ProcessPacket(char* ptr)
 			avatar.show();
 		}
 		else if (id < MAX_USER) {
-			players[id] = OBJECT{ *pieces, 0, 0, 50, 50 };
+			players[id] = OBJECT{ *pieces, 0, 200, 50, 50 };
 			players[id].id = id;
 			strcpy_s(players[id].name, sizeof(players[id].name), my_packet->name);
 			players[id].move(my_packet->point.x, my_packet->point.y);
@@ -404,7 +404,6 @@ void ProcessPacket(char* ptr)
 		SC_MOVE_OBJECT_PACKET* my_packet = reinterpret_cast<SC_MOVE_OBJECT_PACKET*>(ptr);
 		int other_id = my_packet->id;
 		if (other_id == g_myid) {
-			cout << my_packet->point.x << ", " << my_packet->point.y << endl;
 			avatar.move(my_packet->point.x, my_packet->point.y);
 			g_left_x = my_packet->point.x - SCREEN_WIDTH / 2;
 			g_top_y = my_packet->point.y - SCREEN_HEIGHT / 2;

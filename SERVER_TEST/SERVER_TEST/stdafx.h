@@ -156,67 +156,78 @@ public:
 	float F = 0;
 	float G = 0;
 	float H = 0;
-	shared_ptr<A_star_Node> parent;
+	A_star_Node* parent;
 	TILEPOINT Pos = { 0,0 };
 	A_star_Node() {}
-	A_star_Node(TILEPOINT _Pos, float _G, float _H, shared_ptr<A_star_Node> _parent)
+	A_star_Node(TILEPOINT _Pos, float _G, float _H, A_star_Node* _parent)
 		: Pos(_Pos), G(_G), H(_H), F(_G + _H), parent(_parent) {}
 
+	void Reset()
+	{
+		F = G = H = 0;
+		parent = nullptr;
+		Pos = { 0, 0 };
+	}
 };
 
 struct CompareNodes {
-	bool operator()(const shared_ptr<A_star_Node>& node1, const shared_ptr<A_star_Node>& node2) {
+	bool operator()(A_star_Node*& node1, A_star_Node*& node2) {
 		return node1->F > node2->F;
 	}
 };
 
 
-//class AStar_Pool {
-//private:
-//	queue<A_star_Node*> objectQueue;
-//	mutex pool_lock;
-//public:
-//	AStar_Pool()
-//	{
-//		for (int i = 0; i < 4000; ++i) {
-//			objectQueue.push(make_shared<A_star_Node>());
-//		}
-//	}
-//	~AStar_Pool()
-//	{
-//	}
-//
-//	A_star_Node* GetMemory(XMFLOAT3 _Pos, XMFLOAT3 _Dest_Pos, float _G = 0, A_star_Node* node = nullptr)
-//	{
-//		lock_guard<mutex> ll{ pool_lock };
-//		if (objectQueue.empty()) {
-//			cout << "AStar_Pool called add memory request\n";
-//			for (int i = 0; i < 500; ++i)
-//				objectQueue.push(make_shared<A_star_Node>());
-//		}
-//		if (!objectQueue.empty()) {
-//			auto& front = objectQueue.front();
-//			objectQueue.pop();
-//
-//			front->Initialize(_Pos, _Dest_Pos, _G, node);
-//
-//			return front;
-//		}
-//		else {
-//			return nullptr;
-//		}
-//	}
-//
-//	void ReturnMemory(A_star_Node* Mem)
-//	{
-//		Mem->parent.reset();
-//		Mem->Pos = { 0,0,0 };
-//		Mem->G = Mem->H = Mem->F = 0;
-//		lock_guard<mutex> ll{ pool_lock };
-//		objectQueue.push(Mem);
-//	}
-//	void PrintSize()
-//	{
-//		cout << "CurrentSize - " << objectQueue.size() << endl;
-//	}
-//};
+class AStar_Pool {
+private:
+	concurrent_queue<A_star_Node*> objectQueue;
+public:
+	AStar_Pool() {}
+	AStar_Pool(size_t MemorySize)
+	{
+		for (int i = 0; i < MemorySize; ++i) {
+			objectQueue.push(new A_star_Node());
+		}
+	}
+	~AStar_Pool()
+	{
+		A_star_Node* mem;
+		while (objectQueue.try_pop(mem))
+		{
+			delete mem;
+		}
+	}
+
+	A_star_Node* GetMemory(TILEPOINT _Pos, float _G, float _H, A_star_Node* _parent)
+	{
+		A_star_Node* front;
+		if (objectQueue.try_pop(front) == false) {
+			for (int i = 0; i < 50; ++i)
+				objectQueue.push(new A_star_Node());
+			objectQueue.try_pop(front);
+			front->Pos = _Pos;
+			front->G = _G;
+			front->H = _H;                   
+			front->F = _G + _H;
+			front->parent = _parent;
+			return front;
+		}
+		else {
+			front->Pos = _Pos;
+			front->G = _G;
+			front->H = _H;
+			front->F = _G + _H;
+			front->parent = _parent;
+			return front;
+		}
+	}
+
+	void ReturnMemory(A_star_Node* Mem)
+	{
+		Mem->Reset();
+		objectQueue.push(Mem);
+	}
+	void PrintSize()
+	{
+		cout << "CurrentSize - " << objectQueue.unsafe_size() << endl;
+	}
+};
