@@ -67,6 +67,23 @@ struct TIMER_EVENT {
 	}
 };
 
+struct TILEPOINT
+{
+	short x;
+	short y;
+
+	TILEPOINT operator+(const TILEPOINT& other) const {
+		TILEPOINT result;
+		result.x = this->x + other.x;
+		result.y = this->y + other.y;
+		return result;
+	}
+
+	bool operator==(const TILEPOINT& other) const {
+		return this->x == other.x && this->y == other.y;
+	}
+};
+
 enum DB_EVENT_TYPE { EV_SIGNIN, EV_SIGNUP, EV_SAVE };
 struct DB_EVENT {
 	unsigned short session_id = -1;
@@ -77,6 +94,7 @@ struct DB_EVENT {
 	int Max_Hp = -1;
 	int Lv = -1;
 	int Exp = -1;
+	TILEPOINT pos = { 0,0 };
 };
 
 template <typename T>
@@ -119,22 +137,7 @@ public:
 	}
 };
 
-struct TILEPOINT
-{
-	short x;
-	short y;
 
-	TILEPOINT operator+(const TILEPOINT& other) const {
-		TILEPOINT result;
-		result.x = this->x + other.x;
-		result.y = this->y + other.y;
-		return result;
-	}
-
-	bool operator==(const TILEPOINT& other) const {
-		return this->x == other.x && this->y == other.y;
-	}
-};
 
 struct PointHash {
 	size_t operator()(const TILEPOINT& point) const {
@@ -231,3 +234,4 @@ public:
 		cout << "CurrentSize - " << objectQueue.unsafe_size() << endl;
 	}
 };
+

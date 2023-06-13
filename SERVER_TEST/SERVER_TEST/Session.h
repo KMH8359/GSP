@@ -126,9 +126,9 @@ public:
 		SC_STAT_CHANGE_PACKET packet;
 		packet.size = sizeof(packet);
 		packet.type = SC_STAT_CHANGE;
-		packet.hp = HP;
+		packet.hp = HP.load();
 		packet.max_hp = MAX_HP;
-		packet.exp = EXP;
+		packet.exp = EXP.load();
 		packet.level = Level;
 		do_send(&packet);
 	}

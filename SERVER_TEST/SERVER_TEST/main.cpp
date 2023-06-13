@@ -14,11 +14,11 @@ array<array<bool, W_WIDTH>, W_HEIGHT> GridMap;
 SOCKET listenSocket, g_c_socket;
 OVER_EXP g_a_over;
 mutex _m;
+array<int, 25> LevelUp_Required_Experience{};
 void disconnect(int c_id);
 
-//#define USE_DB 
+#define USE_DB 
 
-//AStar_Pool A_star_pool(200'000'0);
 
 TILEPOINT vec[4]{
 	TILEPOINT(-1,0),
@@ -64,7 +64,6 @@ void HandleDiagnosticRecord(SQLHANDLE hHandle, SQLSMALLINT hType, RETCODE RetCod
 	while (SQLGetDiagRec(hType, hHandle, ++iRec, wszState, &iError, wszMessage,
 		(SQLSMALLINT)(sizeof(wszMessage) / sizeof(WCHAR)), (SQLSMALLINT*)NULL) == SQL_SUCCESS)
 	{
-		// Hide data truncated.. 
 		if (wcsncmp(wszState, L"01004", 5))
 		{
 			fwprintf(stderr, L"[%5.5s] %s (%d)\n", wszState, wszMessage, iError);
@@ -78,7 +77,6 @@ void DB_Thread()
 	SQLHDBC hdbc;
 	SQLHSTMT hstmt = 0;
 	SQLRETURN retcode;
-	//SQLWCHAR szUser_ID[IDPW_SIZE], szUser_PWD[IDPW_SIZE];
 	SQLLEN OutSize;
 
 	setlocale(LC_ALL, "korean");
@@ -122,6 +120,8 @@ void DB_Thread()
 						SQLINTEGER param4 = ev.Max_Hp;
 						SQLINTEGER param5 = ev.Lv;
 						SQLINTEGER param6 = ev.Exp;
+						SQLINTEGER param7 = ev.pos.x;
+						SQLINTEGER param8 = ev.pos.y;
 						switch (ev._event) {
 						case EV_SIGNUP:
 							retcode = SQLPrepare(hstmt, (SQLWCHAR*)L"{CALL sign_up(?, ?)}", SQL_NTS);
@@ -159,6 +159,8 @@ void DB_Thread()
 									SQLBindCol(hstmt, 4, SQL_C_LONG, &session->MAX_HP, sizeof(int), &OutSize);
 									SQLBindCol(hstmt, 5, SQL_C_LONG, &session->Level, sizeof(int), &OutSize);
 									SQLBindCol(hstmt, 6, SQL_C_LONG, &session->EXP, sizeof(int), &OutSize);
+									SQLBindCol(hstmt, 7, SQL_C_LONG, &session->point.x, sizeof(int), &OutSize);
+									SQLBindCol(hstmt, 8, SQL_C_LONG, &session->point.y, sizeof(int), &OutSize);
 									retcode = SQLFetch(hstmt);
 									if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
 										OVER_EXP* ov = new OVER_EXP;
@@ -182,13 +184,15 @@ void DB_Thread()
 							SQLFreeStmt(hstmt, SQL_CLOSE);
 							break;
 						case EV_SAVE:
-							retcode = SQLPrepare(hstmt, (SQLWCHAR*)L"{CALL Renewal(?, ?, ?, ?, ?)}", SQL_NTS);
+							retcode = SQLPrepare(hstmt, (SQLWCHAR*)L"{CALL Renewal(?, ?, ?, ?, ?, ?, ?)}", SQL_NTS);
 							if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
 								SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_WCHAR, SQL_WCHAR, 10, 0, (SQLPOINTER)param1, 0, NULL);
 								SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_LONG, SQL_INTEGER, 0, 0, (SQLPOINTER)&param3, 0, NULL);
 								SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_LONG, SQL_INTEGER, 0, 0, (SQLPOINTER)&param4, 0, NULL);
 								SQLBindParameter(hstmt, 4, SQL_PARAM_INPUT, SQL_C_LONG, SQL_INTEGER, 0, 0, (SQLPOINTER)&param5, 0, NULL);
 								SQLBindParameter(hstmt, 5, SQL_PARAM_INPUT, SQL_C_LONG, SQL_INTEGER, 0, 0, (SQLPOINTER)&param6, 0, NULL);
+								SQLBindParameter(hstmt, 6, SQL_PARAM_INPUT, SQL_C_LONG, SQL_INTEGER, 0, 0, (SQLPOINTER)&param7, 0, NULL);
+								SQLBindParameter(hstmt, 7, SQL_PARAM_INPUT, SQL_C_LONG, SQL_INTEGER, 0, 0, (SQLPOINTER)&param8, 0, NULL);
 								retcode = SQLExecute(hstmt);
 								if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
 									retcode = SQLEndTran(SQL_HANDLE_DBC, hdbc, SQL_COMMIT);
@@ -312,8 +316,8 @@ void process_packet(int c_id, char* packet)
 		ev.session_id = c_id;
 		db_queue.push(ev);
 #else
-		session->point.x = rand() % W_WIDTH;
-		session->point.y = rand() % W_HEIGHT;
+		session->point.x = 1000;
+		session->point.y = 1000;
 		session->_state.store(ST_INGAME);
 		session->send_login_info_packet();
 		for (auto& pl : characters) {
@@ -435,7 +439,13 @@ void process_packet(int c_id, char* packet)
 					//std::cout << obj->_id << " 몬스터 부활 타이머 시작\n";
 					TIMER_EVENT ev{ obj->_id, chrono::system_clock::now() + 30s, EV_REVIVE, 0 };
 					timer_queue.push(ev);
-					session->EXP += obj->EXP;
+					session->EXP.fetch_add(obj->EXP);
+					if (session->EXP.load() > LevelUp_Required_Experience[session->Level]) {
+						session->HP.store(1000);
+						session->EXP.fetch_sub(LevelUp_Required_Experience[session->Level]);
+						session->Level++;
+						session->send_statchange_packet();
+					}
 					//std::cout << session->_id << "플레이어가 " << obj->EXP << "경험치 획득\n";
 #ifdef USE_DB
 					DB_EVENT update_event;
@@ -443,10 +453,11 @@ void process_packet(int c_id, char* packet)
 					wchar_t* wcharArray = new wchar_t[NAME_SIZE] {L""};
 					ConvertCharArrayToWideCharArray(session->_name, sizeof(session->_name), wcharArray, sizeof(wcharArray));
 					wcscpy_s(update_event.user_id, sizeof(update_event.user_id) / sizeof(update_event.user_id[0]), wcharArray);
-					update_event.Hp = session->HP;
+					update_event.Hp = session->HP.load();
 					update_event.Max_Hp = session->MAX_HP;
 					update_event.Lv = session->Level;
-					update_event.Exp = session->EXP;
+					update_event.Exp = session->EXP.load();
+					update_event.pos = session->point;
 					db_queue.push(update_event);
 					delete[] wcharArray;
 #endif
@@ -605,7 +616,7 @@ stack<TILEPOINT> MONSTER::Trace_Player(const TILEPOINT start, const TILEPOINT de
 	unordered_map<TILEPOINT, A_star_Node*, PointHash, PointEqual> openlist;
 	priority_queue<A_star_Node*, vector<A_star_Node*>, CompareNodes> pq;
 
-	openlist.reserve(150);
+	openlist.reserve(300);
 	A_star_Node* startNode = m_pool->GetMemory(start, 0.f, Heuristic(start, dest), nullptr);
 	openlist.insert(make_pair(start, startNode));
 	pq.push(startNode);
@@ -620,7 +631,7 @@ stack<TILEPOINT> MONSTER::Trace_Player(const TILEPOINT start, const TILEPOINT de
 			stack<TILEPOINT> path = ReconstructPath(current);
 			for (const auto& pair : openlist) {
 				m_pool->ReturnMemory(pair.second);  // 노드 반환
-			}
+			}                                 
 			return path;
 		}
 
@@ -637,26 +648,6 @@ stack<TILEPOINT> MONSTER::Trace_Player(const TILEPOINT start, const TILEPOINT de
 			if (neighborIter == openlist.end()) {
 				float neighborH = Heuristic(neighborPos, dest);
 				A_star_Node* neighborNode = m_pool->GetMemory(neighborPos, neighborG, neighborH, current);
-				//if (neighborNode == nullptr) {
-				//	cout << "start - " << start.x << ", " << start.y << ", dest - " << dest.x << ", " << dest.y << endl;
-				//	if (GridMap[start.x][start.y] == false) cout << "start pos error\n";
-				//	stack<TILEPOINT> path = ReconstructPath(current);
-				//	while (path.empty() == false) {
-				//		auto& node = path.top();
-				//		cout << node.x << ", " << node.y << endl;
-				//		path.pop();
-				//	}
-				//	exit(-1);
-				//	//while (!pq.empty()) {
-				//	//	auto node = pq.top();
-				//	//	cout << node->Pos.x << ", " << node->Pos.y << ", " << node->F << ", " << node->G << ", " << node->H << endl;
-				//	//	pq.pop();
-				//	//}
-				//	//cout << "priority_queue size - " << pq.size() << ", closelist size - " << closelist.size() << ", openlist size - " << openlist.size() << 
-				//	//	", start - " << start.x << ", " << start.y <<
-				//	//	", neighborPos - " << neighborPos.x << ", " << neighborPos.y << ", dest - " << dest.x << ", " << dest.y << ", _G - " << neighborG << ", _H - " << neighborH << endl;
-				//	//exit(-1);
-				//}
 				openlist.insert(make_pair(neighborPos, neighborNode));
 				pq.push(neighborNode);
 			}
@@ -671,9 +662,9 @@ stack<TILEPOINT> MONSTER::Trace_Player(const TILEPOINT start, const TILEPOINT de
 		}
 	}
 
-	m_pool->ReturnMemory(startNode);  // 시작 노드 반환
+	m_pool->ReturnMemory(startNode);  
 	for (const auto& pair : openlist) {
-		m_pool->ReturnMemory(pair.second);  // openlist에 있는 노드들 반환
+		m_pool->ReturnMemory(pair.second);  
 	}
 	cout << "FAILED\n";
 
@@ -789,12 +780,12 @@ void worker_thread(HANDLE h_iocp)
 				if (can_attack(static_cast<int>(key), NPC->target_id)) {
 					auto session = (SESSION*)characters[NPC->target_id];
 					session->_lock.lock();
-					session->HP -= 50;
-					if (session->HP <= 0) { // 사망처리
+					session->HP.fetch_sub(50);
+					if (session->HP.load() <= 0) { // 사망처리
 						session->point.x = 1000;
 						session->point.y = 1000;
-						session->EXP /= 2;
-						session->HP = session->MAX_HP;
+						session->EXP.fetch_sub(session->EXP / 2);
+						session->HP.store(session->MAX_HP);
 						session->send_statchange_packet();
 						unordered_set<int> near_list;
 						session->_view_list.s_mutex.lock_shared();
@@ -885,38 +876,6 @@ void worker_thread(HANDLE h_iocp)
 	}
 }
 
-int API_get_x(lua_State* L)
-{
-	int user_id =
-		(int)lua_tointeger(L, -1);
-	lua_pop(L, 2);
-	int x = characters[user_id]->point.x;
-	lua_pushnumber(L, x);
-	return 1;
-}
-
-int API_get_y(lua_State* L)
-{
-	int user_id =
-		(int)lua_tointeger(L, -1);
-	lua_pop(L, 2);
-	int y = characters[user_id]->point.y;
-	lua_pushnumber(L, y);
-	return 1;
-}
-
-int API_SendMessage(lua_State* L)
-{
-	int my_id = (int)lua_tointeger(L, -3);
-	int user_id = (int)lua_tointeger(L, -2);
-	char* mess = (char*)lua_tostring(L, -1);
-
-	lua_pop(L, 4);
-
-	auto session = (SESSION*)characters[user_id];
-	session->send_chat_packet(my_id, mess);
-	return 0;
-}
 
 void InitializeMap()
 {
@@ -1073,6 +1032,11 @@ int main()
 
 	InitializeNPC(monsterfilename);
 	InitializeMap();
+
+	for (int i = 1; i < LevelUp_Required_Experience.size(); ++i) {
+		LevelUp_Required_Experience[i] = 100 * pow(2, i - 1);
+		cout << i << " - " << LevelUp_Required_Experience[i] << endl;
+	}
 
 
 	h_iocp = CreateIoCompletionPort(INVALID_HANDLE_VALUE, 0, 0, 0);

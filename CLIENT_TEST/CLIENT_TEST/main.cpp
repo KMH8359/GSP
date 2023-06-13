@@ -9,7 +9,7 @@ constexpr auto SCREEN_WIDTH = 20;
 constexpr auto SCREEN_HEIGHT = 20;
 
 constexpr auto TILE_WIDTH = 50;
-constexpr auto WINDOW_WIDTH = SCREEN_WIDTH * TILE_WIDTH;   // size of window
+constexpr auto WINDOW_WIDTH = SCREEN_WIDTH * TILE_WIDTH;  
 constexpr auto WINDOW_HEIGHT = SCREEN_WIDTH * TILE_WIDTH;
 
 int g_left_x;
@@ -86,17 +86,6 @@ public:
 		if (false == m_showing) return;
 		a_draw();
 		t_draw();		
-		//float rx = (m_x - g_left_x) * 50.f;
-		//float ry = (m_y - g_top_y) * 50.f;
-		//m_sprite.setPosition(rx, ry);
-		//g_window->draw(m_sprite);
-		//auto size = m_name.getGlobalBounds();
-		//if (m_mess_end_time < chrono::system_clock::now()) {
-		//}
-		//else {
-		//	m_chat.setPosition(rx + 32 - size.width / 2, ry - 10);
-		//	g_window->draw(m_chat);
-		//}
 	}
 
 	void add_chat(const char str[]) {
@@ -130,7 +119,6 @@ private:
 
 	sf::Text m_name;
 	sf::Text m_chat;
-	//chrono::system_clock::time_point m_mess_end_time;
 public:
 	sf::Sprite m_sprite;
 	int		id;
@@ -143,7 +131,6 @@ public:
 	short left = 0;
 	short top = 0;
 
-	//chrono::system_clock::time_point m_lastFrameTime;
 	char name[NAME_SIZE];
 	OBJECT(sf::Texture& t, int x, int y, int x2, int y2) {
 		m_showing = false;
@@ -153,7 +140,6 @@ public:
 		left = x;
 		top = y;
 		set_name("NONAME");
-		//m_lastFrameTime = chrono::system_clock::now();
 	}
 	OBJECT() {
 		m_showing = false;
@@ -193,13 +179,6 @@ public:
 		float ry = (m_y - g_top_y) * 50.f;
 		m_sprite.setPosition(rx, ry);
 		g_window->draw(m_sprite);
-		//auto size = m_name.getGlobalBounds();
-		//if (m_mess_end_time < chrono::system_clock::now()) {
-		//}
-		//else {
-		//	m_chat.setPosition(rx + 32 - size.width / 2, ry - 10);
-		//	g_window->draw(m_chat);
-		//}
 	}
 	void set_name(const char str[]) {
 		m_name.setFont(g_font);
@@ -214,20 +193,13 @@ public:
 		m_chat.setString(str);
 		m_chat.setFillColor(sf::Color(255, 255, 255));
 		m_chat.setStyle(sf::Text::Bold);
-		//m_mess_end_time = chrono::system_clock::now() + chrono::seconds(3);
 	}
 
 	void animate()
 	{
-		//auto now = chrono::system_clock::now();
-		//auto elapsed = now - m_lastFrameTime;
-		//if (elapsed >= chrono::seconds(1))
-		//{
 		auto rect = m_sprite.getTextureRect();
 		rect.left = (rect.left + 50) % 150 + left;
 		m_sprite.setTextureRect(rect);
-		//m_lastFrameTime = now;
-		//}
 	}
 };
 
@@ -368,7 +340,6 @@ void ProcessPacket(char* ptr)
 	break;
 	case SC_LOGIN_FAIL:
 	{
-		//login_state = 0;
 	}
 	break;
 	case SC_ADD_OBJECT:
@@ -389,12 +360,11 @@ void ProcessPacket(char* ptr)
 			players[id].set_name(my_packet->name);
 			players[id].show();
 		}
-		else { // id % 4로 몬스터 타입이 결정됨
+		else { 
 			int type = (int)my_packet->monster_type % 4;
 			players[id] = OBJECT{ *monsters, (type / 2) * 150,  (type % 2) * 200, 50, 50 };
 			players[id].id = id;
 			players[id].move(my_packet->point.x, my_packet->point.y);
-			//players[id].set_name(my_packet->name);
 			players[id].show();
 		}
 		break;
@@ -411,7 +381,6 @@ void ProcessPacket(char* ptr)
 			rect.top = avatar.top + my_packet->direction * 50;
 			avatar.m_sprite.setTextureRect(rect);
 			avatar.animate();
-			//avatar.a_resize(0, my_packet->direction * 50, 50, 50);
 		}
 		else {
 			players[other_id].move(my_packet->point.x, my_packet->point.y);	
@@ -454,6 +423,9 @@ void ProcessPacket(char* ptr)
 		avatar.Level = my_packet->level;
 		avatar.MAX_HP = my_packet->max_hp;
 		avatar.Exp = my_packet->exp;
+		char buf[8];
+		sprintf_s(buf, "%d", avatar.Level);
+		Level_Text.setString(buf);
 		HPBAR[0].a_resize(0, 0, avatar.HP, 50);
 		HPBAR[1].a_resize(0, 0, -1 * (avatar.MAX_HP - avatar.HP), 50);
 		cout << avatar.HP << " / " << avatar.MAX_HP << endl;
@@ -507,14 +479,6 @@ void login_scene()
 	if (recv_result != sf::Socket::NotReady)
 		if (received > 0) process_data(net_buf, received);
 
-
-
-	//for (int i = 0; i < SCREEN_WIDTH; ++i)
-	//	for (int j = 0; j < SCREEN_HEIGHT; ++j)
-	//	{
-	//		white_tile.a_move(TILE_WIDTH * i, TILE_WIDTH * j);
-	//		white_tile.a_draw();
-	//	}
 	g_window->draw(*background);
 
 	
@@ -721,18 +685,15 @@ int main()
 				window.close();
 
 			if (event.type == sf::Event::TextEntered && on_chat) {
-				//if (event.key.code >= sf::Keyboard::A && event.key.code <= sf::Keyboard::Z)
 				if (event.text.unicode < 128)
 				{
 					char inputChar = static_cast<char>(event.text.unicode);
-					// 알파벳 키 입력 처리 로직
 					m_mess[chat_length++] = inputChar;
 				}
 				else
 				{
-					// ASCII 문자 이외의 문자 (한글 등)
 					wchar_t inputChar = static_cast<wchar_t>(event.text.unicode);
-					// 입력된 문자 처리 로직
+
 					m_mess[chat_length++] = inputChar;
 				}
 				break;

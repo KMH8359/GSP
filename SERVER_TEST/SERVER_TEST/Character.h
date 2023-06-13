@@ -11,7 +11,7 @@ public:
 	TILEPOINT point;
 	atomic<int>	HP;
 	int	MAX_HP;
-	int	EXP;
+	atomic<int>	EXP;
 	int	Level;
 	char	_name[10];
 	atomic_bool		is_alive;
