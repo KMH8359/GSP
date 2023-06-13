@@ -18,8 +18,6 @@ constexpr char SC_CHAT = 6;
 constexpr char SC_LOGIN_OK = 7;
 constexpr char SC_LOGIN_FAIL = 8;
 constexpr char SC_STAT_CHANGE = 9;
-constexpr char SC_MONSTER_ATTACK = 10;
-constexpr char SC_DEAD = 11;
 
 #pragma pack (push, 1)
 struct CS_LOGIN_PACKET {
@@ -124,15 +122,4 @@ struct SC_STAT_CHANGE_PACKET {
 
 };
 
-struct SC_MONSTER_ATTACK_PACKET {
-	unsigned short size;
-	char	type;
-	short	damage;
-};
-
-struct SC_DEAD_PACKET {
-	unsigned short size;
-	char	type;
-	short	id;
-};
 #pragma pack (pop)

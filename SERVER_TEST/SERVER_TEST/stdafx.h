@@ -38,6 +38,7 @@ extern "C"
 
 using namespace std;
 using namespace concurrency;
+using namespace std::chrono;
 
 constexpr int VIEW_RANGE = 15;
 constexpr int ATTACK_RANGE = 1;
@@ -86,7 +87,7 @@ struct TILEPOINT
 
 enum DB_EVENT_TYPE { EV_SIGNIN, EV_SIGNUP, EV_SAVE };
 struct DB_EVENT {
-	unsigned short session_id = -1;
+	short session_id = -1;
 	wchar_t user_id[NAME_SIZE]{};
 	wchar_t user_password[NAME_SIZE]{};
 	int _event = -1;

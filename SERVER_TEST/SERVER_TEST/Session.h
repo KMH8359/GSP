@@ -112,15 +112,6 @@ public:
 		do_send(&packet);
 	}
 
-	void send_dead_packet(int c_id)
-	{
-		SC_DEAD_PACKET packet;
-		packet.id = c_id;
-		packet.size = sizeof(packet);
-		packet.type = SC_DEAD;
-		do_send(&packet);
-	}
-
 	void send_statchange_packet()
 	{
 		SC_STAT_CHANGE_PACKET packet;

@@ -53,11 +53,11 @@ public:
 		m_showing = false;
 		m_sprite.setTexture(t);
 		m_sprite.setTextureRect(sf::IntRect(x, y, x2, y2));
-		m_maxChatCount = 10;
+		m_maxChatCount = 7;
 	}
 	CHATBOX() {
 		m_showing = false;
-		m_maxChatCount = 10;
+		m_maxChatCount = 7;
 	}
 	void show()
 	{

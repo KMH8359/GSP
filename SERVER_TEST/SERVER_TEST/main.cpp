@@ -77,7 +77,7 @@ void DB_Thread()
 	SQLHDBC hdbc;
 	SQLHSTMT hstmt = 0;
 	SQLRETURN retcode;
-	SQLLEN OutSize;
+	SQLLEN OutSize{};
 
 	setlocale(LC_ALL, "korean");
 
@@ -155,17 +155,31 @@ void DB_Thread()
 								if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
 									wcout << "LOGIN SUCCEED\n";
 									SQLBindCol(hstmt, 1, SQL_C_CHAR, session->_name, sizeof(session->_name), &OutSize);
-									SQLBindCol(hstmt, 3, SQL_C_LONG, &session->HP, sizeof(int), &OutSize);
-									SQLBindCol(hstmt, 4, SQL_C_LONG, &session->MAX_HP, sizeof(int), &OutSize);
-									SQLBindCol(hstmt, 5, SQL_C_LONG, &session->Level, sizeof(int), &OutSize);
-									SQLBindCol(hstmt, 6, SQL_C_LONG, &session->EXP, sizeof(int), &OutSize);
-									SQLBindCol(hstmt, 7, SQL_C_LONG, &session->point.x, sizeof(int), &OutSize);
-									SQLBindCol(hstmt, 8, SQL_C_LONG, &session->point.y, sizeof(int), &OutSize);
+									SQLBindCol(hstmt, 3, SQL_C_LONG, &session->HP, sizeof(session->HP), &OutSize);
+									SQLBindCol(hstmt, 4, SQL_C_LONG, &session->MAX_HP, sizeof(session->MAX_HP), &OutSize);
+									SQLBindCol(hstmt, 5, SQL_C_LONG, &session->Level, sizeof(session->Level), &OutSize);
+									SQLBindCol(hstmt, 6, SQL_C_LONG, &session->EXP, sizeof(session->EXP), &OutSize);
+									SQLBindCol(hstmt, 7, SQL_C_SHORT, &session->point.x, sizeof(session->point.x), &OutSize);
+									SQLBindCol(hstmt, 8, SQL_C_SHORT, &session->point.y, sizeof(session->point.y), &OutSize);
 									retcode = SQLFetch(hstmt);
 									if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
-										OVER_EXP* ov = new OVER_EXP;
-										ov->_comp_type = OP_LOGIN_OK;
-										PostQueuedCompletionStatus(h_iocp, 1, session->_id, &ov->_over);
+										bool in_use = false;
+										for (int i = 0; i < MAX_USER; ++i) {
+											if (characters[i]->_state.load() != ST_INGAME || session->_id == characters[i]->_id) continue;
+											if (strcmp(session->_name, characters[i]->_name) == 0) {
+												in_use = true;
+												break;
+											}
+										}
+										if (in_use == false) {
+											OVER_EXP* ov = new OVER_EXP;
+											ov->_comp_type = OP_LOGIN_OK;
+											PostQueuedCompletionStatus(h_iocp, 1, session->_id, &ov->_over);
+										}
+										else {
+											wcout << "This ID is already in use\n";
+											session->send_loginFail_packet();
+										}
 									}
 									else {
 										wcout << "LOGIN FAILED \n";
@@ -745,8 +759,6 @@ void worker_thread(HANDLE h_iocp)
 		case OP_LOGIN_OK: 
 		{
 			auto session = (SESSION*)characters[static_cast<int>(key)];
-			session->point.x = rand() % 100;
-			session->point.y = rand() % 100;
 			session->_state.store(ST_INGAME);
 			session->send_login_info_packet();
 			for (auto& pl : characters) {
@@ -780,13 +792,27 @@ void worker_thread(HANDLE h_iocp)
 				if (can_attack(static_cast<int>(key), NPC->target_id)) {
 					auto session = (SESSION*)characters[NPC->target_id];
 					session->_lock.lock();
-					session->HP.fetch_sub(50);
+					//session->HP.fetch_sub(50);
 					if (session->HP.load() <= 0) { // »ç¸ÁÃ³¸®
 						session->point.x = 1000;
 						session->point.y = 1000;
 						session->EXP.fetch_sub(session->EXP / 2);
 						session->HP.store(session->MAX_HP);
 						session->send_statchange_packet();
+#ifdef USE_DB
+						DB_EVENT update_event;
+						update_event._event = EV_SAVE;
+						wchar_t* wcharArray = new wchar_t[NAME_SIZE] {L""};
+						ConvertCharArrayToWideCharArray(session->_name, sizeof(session->_name), wcharArray, sizeof(wcharArray));
+						wcscpy_s(update_event.user_id, sizeof(update_event.user_id) / sizeof(update_event.user_id[0]), wcharArray);
+						update_event.Hp = session->HP.load();
+						update_event.Max_Hp = session->MAX_HP;
+						update_event.Lv = session->Level;
+						update_event.Exp = session->EXP.load();
+						update_event.pos = session->point;
+						db_queue.push(update_event);
+						delete[] wcharArray;
+#endif
 						unordered_set<int> near_list;
 						session->_view_list.s_mutex.lock_shared();
 						unordered_set<int> old_vlist = session->_view_list;
@@ -1035,7 +1061,6 @@ int main()
 
 	for (int i = 1; i < LevelUp_Required_Experience.size(); ++i) {
 		LevelUp_Required_Experience[i] = 100 * pow(2, i - 1);
-		cout << i << " - " << LevelUp_Required_Experience[i] << endl;
 	}
 
 

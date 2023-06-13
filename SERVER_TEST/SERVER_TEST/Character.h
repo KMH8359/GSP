@@ -22,8 +22,7 @@ public:
 	CHARACTER()
 	{
 		_id = -1;
-		point.x = point.y = EXP = Level = last_move_time = direction = -1;
-		HP = MAX_HP = 1000;
+		HP = MAX_HP = point.x = point.y = EXP = Level = last_move_time = direction = -1;
 		_name[0] = 0;
 		_state = ST_FREE;
 		is_alive = true;

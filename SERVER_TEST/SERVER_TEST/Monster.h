@@ -7,7 +7,6 @@ class MONSTER : public CHARACTER {
 public:
 	atomic_bool	_is_active;
 	int target_id = -1;
-	lua_State* _L;
 	mutex	_ll;
 	ATTACK_TYPE a_type;
 	MOVE_TYPE m_type;
