@@ -93,16 +93,6 @@ public:
 		do_send(&packet);
 	}
 
-	void send_loginOK_packet()
-	{
-		SC_LOGIN_OK_PACKET packet;
-		packet.size = sizeof(packet);
-		packet.type = SC_LOGIN_OK;
-		packet.id = _id;
-		packet.HP = HP;
-		packet.EXP = EXP;
-		do_send(&packet);
-	}
 
 	void send_loginFail_packet()
 	{
