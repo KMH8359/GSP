@@ -312,7 +312,7 @@ void WakeUpNPC(int npc_id, int waker)
 	bool old_state = false;
 	if (false == atomic_compare_exchange_strong(&NPC->_is_active, &old_state, true))
 		return;
-	TIMER_EVENT ev{ npc_id, chrono::system_clock::now(), EV_RANDOM_MOVE, 0 };
+	TIMER_EVENT ev{ npc_id, chrono::system_clock::now(), EV_NPC_UPDATE, 0 };
 	timer_queue.push(ev);
 }
 
@@ -870,7 +870,7 @@ void worker_thread(HANDLE h_iocp)
 				else {
 					NPC->move();
 				}
-				TIMER_EVENT npc_ev{ static_cast<int>(key), chrono::system_clock::now() + 1s, EV_RANDOM_MOVE, 0 };
+				TIMER_EVENT npc_ev{ static_cast<int>(key), chrono::system_clock::now() + 1s, EV_NPC_UPDATE, 0 };
 				timer_queue.push(npc_ev);
 			}
 			else {
@@ -988,24 +988,12 @@ void do_timer()
 				continue;
 			}
 			switch (ev.event_id) {
-			case EV_RANDOM_MOVE: {
+			case EV_NPC_UPDATE: {
 				OVER_EXP* ov = new OVER_EXP;
 				ov->_comp_type = OP_NPC_MOVE;
 				PostQueuedCompletionStatus(h_iocp, 1, ev.obj_id, &ov->_over);
 			}
 							   break;
-			case EV_ATTACK: {
-				OVER_EXP* ov = new OVER_EXP;
-				ov->_comp_type = OP_NPC_ATTACK;
-				PostQueuedCompletionStatus(h_iocp, 1, ev.obj_id, &ov->_over);
-			}
-						  break;
-			case EV_CHASE_MOVE: {
-				OVER_EXP* ov = new OVER_EXP;
-				ov->_comp_type = OP_NPC_CHASE;
-				PostQueuedCompletionStatus(h_iocp, 1, ev.obj_id, &ov->_over);
-			}
-							  break;
 			case EV_REVIVE: {
 				if (!is_pc(ev.obj_id)) {
 					std::cout << ev.obj_id << " 몬스터가 부활함\n";
