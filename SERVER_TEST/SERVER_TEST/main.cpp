@@ -17,7 +17,7 @@ mutex _m;
 array<int, 25> LevelUp_Required_Experience{};
 void disconnect(int c_id);
 
-#define USE_DB 
+//#define USE_DB 
 
 
 TILEPOINT vec[4]{
@@ -332,8 +332,10 @@ void process_packet(int c_id, char* packet)
 		ev.session_id = c_id;
 		db_queue.push(ev);
 #else
-		session->point.x = 1000;
-		session->point.y = 1000;
+		session->point.x = rand() % 2000;
+		session->point.y = rand() % 2000;
+		session->HP = session->MAX_HP = 1000;
+		session->Level = 1;
 		session->_state.store(ST_INGAME);
 		session->send_login_info_packet();
 		for (auto& pl : characters) {

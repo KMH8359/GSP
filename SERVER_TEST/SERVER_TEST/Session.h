@@ -15,6 +15,7 @@ public:
 		is_healing = false;
 		_socket = 0;
 		_prev_remain = 0;
+		HP = 1000;
 	}
 
 	~SESSION() {}
