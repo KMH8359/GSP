@@ -565,7 +565,8 @@ void client_finish()
 int main()
 {
 	wcout.imbue(locale("korean"));
-	sf::Socket::Status status = s_socket.connect("127.0.0.1", PORT_NUM);
+	//sf::Socket::Status status = s_socket.connect("127.0.0.1", PORT_NUM);
+	sf::Socket::Status status = s_socket.connect("10.30.1.2", PORT_NUM);
 	s_socket.setBlocking(false);
 
 	if (status != sf::Socket::Done) {
