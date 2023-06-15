@@ -565,8 +565,7 @@ void client_finish()
 int main()
 {
 	wcout.imbue(locale("korean"));
-	//sf::Socket::Status status = s_socket.connect("127.0.0.1", PORT_NUM);
-	sf::Socket::Status status = s_socket.connect("10.30.1.2", PORT_NUM);
+	sf::Socket::Status status = s_socket.connect("127.0.0.1", PORT_NUM);
 	s_socket.setBlocking(false);
 
 	if (status != sf::Socket::Done) {
@@ -638,29 +637,78 @@ int main()
 					}
 				}
 			}
-			if (event.type == sf::Event::KeyPressed && login_state < 2) {
+			if (event.type == sf::Event::KeyPressed) {
+				if (login_state < 2) {
+					if (event.key.code >= sf::Keyboard::A && event.key.code <= sf::Keyboard::Z)
+					{
+						char inputChar = static_cast<char>('a' + (event.key.code - sf::Keyboard::A));
+						m_login_string[login_state][chat_length++] = inputChar;
+					}
+					else if (event.key.code >= sf::Keyboard::Num0 && event.key.code <= sf::Keyboard::Num9)
+					{
+						char inputChar = static_cast<char>('0' + (event.key.code - sf::Keyboard::Num0));
+						m_login_string[login_state][chat_length++] = inputChar;
+					}
 
-				if (event.key.code >= sf::Keyboard::A && event.key.code <= sf::Keyboard::Z)
-				{
-					char inputChar = static_cast<char>('a' + (event.key.code - sf::Keyboard::A));
-					m_login_string[login_state][chat_length++] = inputChar;
-				}
-				else if (event.key.code >= sf::Keyboard::Num0 && event.key.code <= sf::Keyboard::Num9)
-				{
-					char inputChar = static_cast<char>('0' + (event.key.code - sf::Keyboard::Num0));
-					m_login_string[login_state][chat_length++] = inputChar;
-				}
-
-				else if (event.key.code == sf::Keyboard::Backspace)
-				{
-					if (chat_length) {
-						m_login_string[login_state][--chat_length] = '\0';
+					else if (event.key.code == sf::Keyboard::Backspace)
+					{
+						if (chat_length) {
+							m_login_string[login_state][--chat_length] = '\0';
+						}
+					}
+					else if (event.key.code == sf::Keyboard::Enter)
+					{
+						login_state++;
+						chat_length = 0;
 					}
 				}
-				else if (event.key.code == sf::Keyboard::Enter)
-				{
-					login_state++;
-					chat_length = 0;
+				else {
+					if (event.key.code == sf::Keyboard::A)
+					{
+						wchar_t* wcharArray = new wchar_t[NAME_SIZE] {L""};
+						CS_LOGIN_PACKET p;
+						p.size = sizeof(p);
+						p.type = CS_LOGIN;
+
+						ConvertCharArrayToWideCharArray(m_login_string[0], sizeof(m_login_string[0]), wcharArray, sizeof(wcharArray));
+						wcscpy_s(p.id, sizeof(p.id) / sizeof(p.id[0]), wcharArray);
+
+						memset(wcharArray, 0, NAME_SIZE * sizeof(wchar_t));
+
+						ConvertCharArrayToWideCharArray(m_login_string[1], sizeof(m_login_string[1]), wcharArray, sizeof(wcharArray));
+						wcscpy_s(p.password, sizeof(p.password) / sizeof(p.password[0]), wcharArray);
+
+
+						send_packet(&p);
+						for (int i = 0; i < 2; ++i) {
+							memset(m_login_string[i], 0, NAME_SIZE);
+						}
+						delete[] wcharArray;
+						login_state = 0;
+					}
+					else if (event.key.code == sf::Keyboard::S)
+					{
+						wchar_t* wcharArray = new wchar_t[NAME_SIZE] {L""};
+						CS_LOGIN_PACKET p;
+						p.size = sizeof(p);
+						p.type = CS_SIGNUP;
+
+						ConvertCharArrayToWideCharArray(m_login_string[0], sizeof(m_login_string[0]), wcharArray, sizeof(wcharArray));
+						wcscpy_s(p.id, sizeof(p.id) / sizeof(p.id[0]), wcharArray);
+
+						memset(wcharArray, 0, NAME_SIZE * sizeof(wchar_t));
+
+						ConvertCharArrayToWideCharArray(m_login_string[1], sizeof(m_login_string[1]), wcharArray, sizeof(wcharArray));
+						wcscpy_s(p.password, sizeof(p.password) / sizeof(p.password[0]), wcharArray);
+
+
+						send_packet(&p);
+						for (int i = 0; i < 2; ++i) {
+							memset(m_login_string[i], 0, NAME_SIZE);
+						}
+						delete[] wcharArray;
+						login_state = 0;
+					}
 				}
 			}
 		}

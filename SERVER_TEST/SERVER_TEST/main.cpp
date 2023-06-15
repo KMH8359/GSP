@@ -13,11 +13,10 @@ array<CHARACTER*, MAX_USER + MAX_NPC> characters;
 array<array<bool, W_WIDTH>, W_HEIGHT> GridMap;
 SOCKET listenSocket, g_c_socket;
 OVER_EXP g_a_over;
-mutex _m;
 array<int, 25> LevelUp_Required_Experience{};
 void disconnect(int c_id);
 
-//#define USE_DB 
+#define USE_DB 
 
 
 TILEPOINT vec[4]{
@@ -98,11 +97,10 @@ void DB_Thread()
 				SQLSetConnectAttr(hdbc, SQL_LOGIN_TIMEOUT, (SQLPOINTER)5, 0);
 				SQLSetConnectAttr(hdbc, SQL_ATTR_AUTOCOMMIT, (SQLPOINTER)SQL_AUTOCOMMIT_ON, SQL_IS_INTEGER);
 
-				//SQLWCHAR* connectionString = (SQLWCHAR*)L"DRIVER=SQL Server;SERVER=14.36.243.161;DATABASE=SimpleMMORPG; UID=dbAdmin; PWD=2018180005;";
+				SQLWCHAR* connectionString = (SQLWCHAR*)L"DRIVER=SQL Server;SERVER=14.36.243.161;DATABASE=SimpleMMORPG; UID=dbAdmin; PWD=2018180005;";
 
-				//retcode = SQLDriverConnect(hdbc, NULL, connectionString, SQL_NTS, NULL, 1024, NULL, SQL_DRIVER_NOPROMPT);
-				retcode = SQLConnect(hdbc, (SQLWCHAR*)L"2023_gsp_tp", SQL_NTS, (SQLWCHAR*)NULL, 0, NULL, 0);
-				//retcode = SQLConnect(hdbc, (SQLWCHAR*)L"2023_TT_GAME_SERVER_DB", SQL_NTS, (SQLWCHAR*)NULL, 0, NULL, 0);
+				retcode = SQLDriverConnect(hdbc, NULL, connectionString, SQL_NTS, NULL, 1024, NULL, SQL_DRIVER_NOPROMPT);
+				//retcode = SQLConnect(hdbc, (SQLWCHAR*)L"2023_gsp_tp", SQL_NTS, (SQLWCHAR*)NULL, 0, NULL, 0);
 
 				// Allocate statement handle  
 				if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
