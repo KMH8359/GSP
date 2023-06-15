@@ -17,7 +17,7 @@ mutex _m;
 array<int, 25> LevelUp_Required_Experience{};
 void disconnect(int c_id);
 
-#define USE_DB 
+//#define USE_DB 
 
 
 TILEPOINT vec[4]{
