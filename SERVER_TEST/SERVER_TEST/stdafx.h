@@ -22,17 +22,10 @@
 #include <concurrent_unordered_set.h>
 #include <fstream>
 
-extern "C"
-{
-#include "include\lua.h"
-#include "include\lauxlib.h"
-#include "include\lualib.h"
-}
 
 
 #pragma comment(lib, "WS2_32.lib")
 #pragma comment(lib, "MSWSock.lib")
-#pragma comment(lib, "lua54.lib")
 
 
 
