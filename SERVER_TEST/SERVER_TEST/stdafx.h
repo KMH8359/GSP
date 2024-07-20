@@ -50,6 +50,7 @@ constexpr int W_HEIGHT = 2000;
 
 enum EVENT_TYPE { EV_NPC_UPDATE, EV_REVIVE, EV_PLAYERHP_RECOVERY };
 
+
 struct TIMER_EVENT {
 	int obj_id;
 	chrono::system_clock::time_point wakeup_time;
@@ -228,4 +229,5 @@ public:
 		cout << "CurrentSize - " << objectQueue.unsafe_size() << endl;
 	}
 };
+
 

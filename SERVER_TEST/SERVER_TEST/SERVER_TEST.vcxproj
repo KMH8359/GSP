@@ -130,7 +130,9 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="Character.h" />
+    <ClInclude Include="GameLogic.h" />
     <ClInclude Include="Monster.h" />
+    <ClInclude Include="MyThread.h" />
     <ClInclude Include="protocol.h" />
     <ClInclude Include="Session.h" />
     <ClInclude Include="stdafx.h" />

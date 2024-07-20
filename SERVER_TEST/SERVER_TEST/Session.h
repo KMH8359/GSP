@@ -1,5 +1,5 @@
 #pragma once
-#include "CHARACTER.h"
+#include "Monster.h"
 #include "protocol.h"
 
 class SESSION : public CHARACTER {
